@@ -1,4 +1,3 @@
-// app/page.tsx - Updated Main landing page
 'use client'
 import { useState, useEffect } from 'react'
 import { useSession } from 'next-auth/react'
@@ -30,7 +29,8 @@ export default function HomePage() {
       const response = await fetch('/api/courses')
       if (response.ok) {
         const data = await response.json()
-        setCourses(data)
+        console.log('Fetched courses:', data) // Debug log
+        setCourses(Array.isArray(data) ? data : [])
       }
     } catch (error) {
       console.error('Error fetching courses:', error)
@@ -52,7 +52,7 @@ export default function HomePage() {
             Validate your skills with industry-recognized certificates. Take secure, proctored exams
             and get blockchain-verified credentials that employers trust.
           </p>
-          
+
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             {session ? (
               <Link
@@ -87,7 +87,7 @@ export default function HomePage() {
           <h2 className="text-3xl font-bold text-center text-[#001e62] mb-12">
             Why Choose Our Certificates?
           </h2>
-          
+
           <div className="grid md:grid-cols-3 gap-8">
             <div className="text-center p-6">
               <div className="w-16 h-16 bg-[#001e62]/10 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -100,7 +100,7 @@ export default function HomePage() {
                 Safe Exam Browser technology ensures test integrity with advanced monitoring and security features.
               </p>
             </div>
-            
+
             <div className="text-center p-6">
               <div className="w-16 h-16 bg-[#001e62]/10 rounded-full flex items-center justify-center mx-auto mb-4">
                 <svg className="w-8 h-8 text-[#001e62]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -112,7 +112,7 @@ export default function HomePage() {
                 Your certificates are cryptographically signed and stored on blockchain for tamper-proof verification.
               </p>
             </div>
-            
+
             <div className="text-center p-6">
               <div className="w-16 h-16 bg-[#001e62]/10 rounded-full flex items-center justify-center mx-auto mb-4">
                 <svg className="w-8 h-8 text-[#001e62]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -134,12 +134,12 @@ export default function HomePage() {
           <h2 className="text-3xl font-bold text-center text-[#001e62] mb-12">
             Available Certificates
           </h2>
-          
+
           {loading ? (
             <div className="flex justify-center">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#001e62]"></div>
             </div>
-          ) : (
+          ) : Array.isArray(courses) && courses.length > 0 ? (
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
               {courses.slice(0, 6).map((course) => (
                 <div key={course.id} className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow border border-gray-200">
@@ -172,8 +172,12 @@ export default function HomePage() {
                 </div>
               ))}
             </div>
+          ) : (
+            <div className="text-center text-gray-600 py-8">
+              No courses available.
+            </div>
           )}
-          
+
           <div className="text-center mt-12">
             <Link
               href="/certificates"

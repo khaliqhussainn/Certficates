@@ -8,7 +8,10 @@ export async function POST(request: Request) {
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
     }
 
     const { courseId, browserData } = await request.json();
@@ -24,6 +27,10 @@ export async function POST(request: Request) {
     return NextResponse.json(examSession);
   } catch (error) {
     console.error('Error starting exam:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    return NextResponse.json(
+      { error: message },
+      { status: 500 }
+    );
   }
 }
