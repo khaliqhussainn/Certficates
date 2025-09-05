@@ -1,0 +1,242 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User model that syncs with course website
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  password      String?   // For direct registrations
+  courseUserId  String?   @unique // Link to course website user ID
+  image         String?
+  role          Role      @default(STUDENT)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Certificate related data
+  examAttempts     ExamAttempt[]
+  certificates     Certificate[]
+  payments         Payment[]
+  examSessions     ExamSession[]
+  courseCompletions CourseCompletion[] // Added missing relation field
+  
+  @@map("users")
+}
+
+// Course data synced from course website
+model Course {
+  id                String    @id // Same ID as course website
+  title             String
+  description       String    @db.Text
+  category          String
+  level             Level
+  thumbnail         String?
+  isPublished       Boolean   @default(false)
+  certificatePrice  Float     @default(99.00) // Price in USD for certificate exam
+  passingScore      Int       @default(70) // Percentage needed to pass
+  examDuration      Int       @default(120) // Duration in minutes
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Certificate exam related
+  examQuestions     ExamQuestion[]
+  examAttempts      ExamAttempt[]
+  certificates      Certificate[]
+  courseCompletions CourseCompletion[]
+
+  @@map("courses")
+}
+
+// Track course completions from main website
+model CourseCompletion {
+  id          String   @id @default(cuid())
+  userId      String
+  courseId    String
+  completedAt DateTime
+  progress    Float    @default(100)
+  
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, courseId])
+  @@map("course_completions")
+}
+
+// Exam questions for certificate tests
+model ExamQuestion {
+  id          String   @id @default(cuid())
+  courseId    String
+  question    String   @db.Text
+  options     String[] // JSON array of options
+  correctAnswer Int    // Index of correct answer
+  explanation String?  @db.Text
+  difficulty  Difficulty @default(MEDIUM)
+  order       Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  examAnswers ExamAnswer[]
+
+  @@map("exam_questions")
+}
+
+// Secure exam sessions with monitoring
+model ExamSession {
+  id                String        @id @default(cuid())
+  userId            String
+  courseId          String
+  examAttemptId     String?       @unique
+  status            ExamStatus    @default(PENDING)
+  startTime         DateTime?
+  endTime           DateTime?
+  timeRemaining     Int? // Minutes remaining
+  browserFingerprint String?
+  ipAddress         String?
+  safeBrowserKey    String?
+  violations        Json? // Security violations detected
+  isMonitored       Boolean       @default(true)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  examAttempt ExamAttempt?
+
+  @@map("exam_sessions")
+}
+
+// Exam attempts and results
+model ExamAttempt {
+  id            String   @id @default(cuid())
+  userId        String
+  courseId      String
+  sessionId     String?  @unique // Added @unique constraint for one-to-one relation
+  score         Float? // Percentage score
+  passed        Boolean  @default(false)
+  startedAt     DateTime @default(now())
+  completedAt   DateTime?
+  timeSpent     Int? // Minutes spent
+  answers       ExamAnswer[]
+  violations    Json? // Any violations during exam
+  
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course  Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  session ExamSession? @relation(fields: [sessionId], references: [id])
+  certificate Certificate?
+
+  @@map("exam_attempts")
+}
+
+// Individual exam answers
+model ExamAnswer {
+  id             String   @id @default(cuid())
+  examAttemptId  String
+  questionId     String
+  selectedAnswer Int? // Index of selected answer
+  isCorrect      Boolean  @default(false)
+  timeSpent      Int? // Seconds spent on question
+  createdAt      DateTime @default(now())
+
+  examAttempt ExamAttempt  @relation(fields: [examAttemptId], references: [id], onDelete: Cascade)
+  question    ExamQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([examAttemptId, questionId])
+  @@map("exam_answers")
+}
+
+// Generated certificates
+model Certificate {
+  id             String   @id @default(cuid())
+  userId         String
+  courseId       String
+  examAttemptId  String   @unique
+  certificateNumber String @unique
+  score          Float
+  issuedAt       DateTime @default(now())
+  validUntil     DateTime? // Optional expiry
+  pdfPath        String? // Path to generated PDF
+  blockchainHash String? // For blockchain verification
+  isRevoked      Boolean  @default(false)
+  revokedAt      DateTime?
+  revokedReason  String?
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course      Course      @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  examAttempt ExamAttempt @relation(fields: [examAttemptId], references: [id], onDelete: Cascade)
+
+  @@map("certificates")
+}
+
+// Payment processing for exam fees
+model Payment {
+  id             String        @id @default(cuid())
+  userId         String
+  courseId       String?
+  amount         Float
+  currency       String        @default("USD")
+  status         PaymentStatus @default(PENDING)
+  paymentMethod  String? // stripe, paypal, etc.
+  stripePaymentId String?
+  metadata       Json?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("payments")
+}
+
+// System settings and configurations
+model Setting {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String @db.Text
+  type  String @default("string") // string, number, boolean, json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("settings")
+}
+
+// Enums
+enum Role {
+  STUDENT
+  INSTRUCTOR
+  ADMIN
+}
+
+enum Level {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum ExamStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  TERMINATED
+  EXPIRED
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING  // Re-added this variant
+  COMPLETED
+  FAILED
+  REFUNDED
+  CANCELLED
+}
