@@ -13,37 +13,41 @@ export async function POST(request: Request) {
 
     const { examAttemptId } = await request.json();
     
+    if (!examAttemptId) {
+      return NextResponse.json({ error: 'Exam attempt ID is required' }, { status: 400 });
+    }
+    
     const results = await examService.completeExam(examAttemptId);
     
     return NextResponse.json(results);
   } catch (error) {
     console.error('Error completing exam:', error);
-    return NextResponse.json({ error: 'Failed to complete exam' }, { status: 500 });
+    const errorMessage = error instanceof Error ? error.message : 'Failed to complete exam';
+    return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 }
 
-// app/api/certificates/status/[courseId]/route.ts - Check certificate status
-import { NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
-
-export async function GET(
-  request: Request,
-  { params }: { params: { courseId: string } }
-) {
+// Check certificate status
+export async function GET(request: Request) {
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const { searchParams } = new URL(request.url);
+    const courseId = searchParams.get('courseId');
+
+    if (!courseId) {
+      return NextResponse.json({ error: 'Course ID is required' }, { status: 400 });
+    }
+
+    const { prisma } = await import('@/lib/prisma');
+    
     const certificate = await prisma.certificate.findFirst({
       where: {
         userId: session.user.id,
-        courseId: params.courseId,
+        courseId: courseId,
         isRevoked: false,
       },
     });

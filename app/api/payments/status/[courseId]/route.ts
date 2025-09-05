@@ -22,4 +22,3 @@ export async function GET(
     return NextResponse.json({ error: 'Failed to check payment status' }, { status: 500 });
   }
 }
-

@@ -1,29 +1,27 @@
-// types/next-auth.d.ts - NextAuth TypeScript declarations
-import NextAuth from "next-auth"
+
+// Certificate Platform: types/next-auth.d.ts
+import { DefaultSession, DefaultUser } from "next-auth"
+import { JWT, DefaultJWT } from "next-auth/jwt"
 
 declare module "next-auth" {
   interface Session {
     user: {
       id: string
-      email: string
-      name?: string | null
-      image?: string | null
-      role: string
-    }
+      role?: string
+      courseUserId?: string
+    } & DefaultSession["user"]
   }
 
-  interface User {
-    id: string
-    email: string
-    name?: string | null
-    image?: string | null
-    role: string
+  interface User extends DefaultUser {
+    role?: string
+    courseUserId?: string
   }
 }
 
 declare module "next-auth/jwt" {
-  interface JWT {
-    id: string
-    role: string
+  interface JWT extends DefaultJWT {
+    role?: string
+    courseUserId?: string
   }
 }
+

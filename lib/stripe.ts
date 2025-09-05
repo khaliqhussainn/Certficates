@@ -1,12 +1,10 @@
 // lib/stripe.ts
 import Stripe from 'stripe';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from './prisma';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2023-10-16',
 });
-
-const prisma = new PrismaClient();
 
 export class PaymentService {
   // Create payment intent for certificate exam
@@ -34,6 +32,7 @@ export class PaymentService {
           userId,
           courseId,
           isRevoked: false,
+          isValid: true,
         },
       });
 
@@ -50,10 +49,10 @@ export class PaymentService {
         },
       });
 
-      if (pendingPayment && pendingPayment.stripePaymentId) {
+      if (pendingPayment && pendingPayment.stripePaymentIntentId) {
         // Return existing payment intent
         const paymentIntent = await stripe.paymentIntents.retrieve(
-          pendingPayment.stripePaymentId
+          pendingPayment.stripePaymentIntentId
         );
         return {
           clientSecret: paymentIntent.client_secret,
@@ -82,7 +81,7 @@ export class PaymentService {
           currency: 'USD',
           status: 'PENDING',
           paymentMethod: 'stripe',
-          stripePaymentId: paymentIntent.id,
+          stripePaymentIntentId: paymentIntent.id,
           metadata: {
             courseTitle: course.title,
           },
@@ -109,7 +108,7 @@ export class PaymentService {
       }
 
       const payment = await prisma.payment.findFirst({
-        where: { stripePaymentId: paymentIntentId },
+        where: { stripePaymentIntentId: paymentIntentId },
       });
 
       if (!payment) {
@@ -149,12 +148,12 @@ export class PaymentService {
         where: { id: paymentId },
       });
 
-      if (!payment || !payment.stripePaymentId) {
+      if (!payment || !payment.stripePaymentIntentId) {
         throw new Error('Payment not found');
       }
 
       const refund = await stripe.refunds.create({
-        payment_intent: payment.stripePaymentId,
+        payment_intent: payment.stripePaymentIntentId,
         reason: 'requested_by_customer',
       });
 
@@ -163,7 +162,7 @@ export class PaymentService {
         data: { 
           status: 'REFUNDED',
           metadata: {
-            ...payment.metadata as any,
+            ...(payment.metadata as any || {}),
             refundReason: reason,
             refundId: refund.id,
           },
@@ -177,3 +176,7 @@ export class PaymentService {
     }
   }
 }
+
+// Export both the class and instance
+export const paymentService = new PaymentService();
+export { stripe };

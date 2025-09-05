@@ -1,8 +1,8 @@
 // app/api/payments/webhook/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { headers } from 'next/headers';
-
-const paymentService = new PaymentService();
+import { stripe, paymentService } from '@/lib/stripe';
+import Stripe from 'stripe';
 
 export async function POST(req: NextRequest) {
   const body = await req.text();
@@ -21,19 +21,25 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
   }
 
-  switch (event.type) {
-    case 'payment_intent.succeeded':
-      await paymentService.handleSuccessfulPayment(event.data.object.id);
-      break;
-    case 'payment_intent.payment_failed':
-      // Handle failed payment
-      console.log('Payment failed:', event.data.object.id);
-      break;
-    default:
-      console.log(`Unhandled event type: ${event.type}`);
+  try {
+    switch (event.type) {
+      case 'payment_intent.succeeded':
+        await paymentService.handleSuccessfulPayment(event.data.object.id);
+        break;
+      case 'payment_intent.payment_failed':
+        // Handle failed payment
+        console.log('Payment failed:', event.data.object.id);
+        break;
+      default:
+        console.log(`Unhandled event type: ${event.type}`);
+    }
+
+    return NextResponse.json({ received: true });
+  } catch (error) {
+    console.error('Webhook handler error:', error);
+    return NextResponse.json(
+      { error: 'Webhook handler failed' },
+      { status: 500 }
+    );
   }
-
-  return NextResponse.json({ received: true });
 }
-
-export const paymentService = new PaymentService();

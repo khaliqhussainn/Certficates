@@ -1,64 +1,77 @@
-// app/dashboard/page.tsx - User Dashboard
+// app/dashboard/page.tsx - Updated Dashboard
 'use client'
 import { useState, useEffect } from 'react'
 import { useSession } from 'next-auth/react'
-import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Image from 'next/image'
 
-interface Certificate {
-  id: string
-  certificateNumber: string
-  score: number
-  issuedAt: string
-  pdfPath?: string
-  course: {
-    title: string
-    category: string
-    level: string
-    thumbnail?: string
-  }
-}
-
-interface CourseCompletion {
-  id: string
-  completedAt: string
-  progress: number
-  course: {
+interface DashboardData {
+  completions: {
     id: string
-    title: string
-    category: string
-    level: string
-    thumbnail?: string
-    certificatePrice: number
-  }
+    courseId: string
+    completedAt: string
+    progress: number
+    course: {
+      id: string
+      title: string
+      category: string
+      level: string
+      thumbnail?: string
+      certificatePrice: number
+    }
+  }[]
+  certificates: {
+    id: string
+    courseId: string
+    certificateNumber: string
+    score: number
+    issuedAt: string
+    pdfPath?: string
+    course: {
+      title: string
+      category: string
+      level: string
+    }
+  }[]
+  examAttempts: {
+    id: string
+    courseId: string
+    score?: number
+    passed: boolean
+    startedAt: string
+    completedAt?: string
+    course: {
+      title: string
+      certificatePrice: number
+    }
+  }[]
+  payments: {
+    id: string
+    courseId?: string
+    amount: number
+    status: string
+    createdAt: string
+  }[]
 }
 
 export default function DashboardPage() {
   const { data: session } = useSession()
-  const router = useRouter()
-  const [certificates, setCertificates] = useState<Certificate[]>([])
-  const [completedCourses, setCompletedCourses] = useState<CourseCompletion[]>([])
-  const [stats, setStats] = useState({ totalCertificates: 0, totalCoursesCompleted: 0 })
+  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState('overview')
 
   useEffect(() => {
-    if (!session) {
-      router.push('/auth/signin')
-      return
+    if (session?.user?.id) {
+      fetchDashboardData()
     }
-    fetchDashboardData()
   }, [session])
 
   const fetchDashboardData = async () => {
     try {
-      const response = await fetch('/api/dashboard')
-      if (response.ok) {
-        const data = await response.json()
-        setCertificates(data.certificates)
-        setCompletedCourses(data.completedCourses)
-        setStats(data.stats)
-      }
+      setLoading(true)
+      const response = await fetch('/api/user/enrollments')
+      const data = await response.json()
+      setDashboardData(data)
     } catch (error) {
       console.error('Error fetching dashboard data:', error)
     } finally {
@@ -66,198 +79,278 @@ export default function DashboardPage() {
     }
   }
 
-  const downloadCertificate = (certificate: Certificate) => {
-    if (certificate.pdfPath) {
-      const link = document.createElement('a')
-      link.href = certificate.pdfPath
-      link.download = `certificate-${certificate.certificateNumber}.pdf`
-      link.click()
-    }
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString()
   }
 
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#001e62] mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading your dashboard...</p>
+        </div>
       </div>
     )
   }
 
+  const stats = dashboardData ? {
+    completedCourses: dashboardData.completions.length,
+    earnedCertificates: dashboardData.certificates.length,
+    examAttempts: dashboardData.examAttempts.length,
+    totalSpent: dashboardData.payments
+      .filter(p => p.status === 'COMPLETED')
+      .reduce((sum, p) => sum + p.amount, 0)
+  } : { completedCourses: 0, earnedCertificates: 0, examAttempts: 0, totalSpent: 0 }
+
+  const navigation = [
+    { id: 'overview', name: 'Overview', icon: '🏠', href: '/dashboard' },
+    { id: 'courses', name: 'Courses', icon: '📚', href: '/dashboard/courses' },
+    { id: 'certificates', name: 'Certificates', icon: '🏆', href: '/dashboard/certificates' },
+    { id: 'exams', name: 'Exams', icon: '📝', href: '/dashboard/exams' },
+    { id: 'payments', name: 'Payments', icon: '💳', href: '/dashboard/payments' },
+    { id: 'profile', name: 'Profile', icon: '👤', href: '/dashboard/profile' },
+  ]
+
   return (
-    <div className="min-h-screen bg-gray-50 py-8">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-          <p className="text-gray-600">Welcome back, {session?.user?.name}</p>
+          <h1 className="text-3xl font-bold text-[#001e62]">
+            Welcome back, {session?.user?.name || 'Student'}!
+          </h1>
+          <p className="mt-2 text-gray-600">
+            Track your course progress and manage your certificates
+          </p>
         </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <div className="bg-white p-6 rounded-lg shadow">
+        {/* Navigation Tabs */}
+        <div className="mb-8">
+          <div className="border-b border-gray-200">
+            <nav className="flex space-x-8 overflow-x-auto">
+              {navigation.map((item) => (
+                <Link
+                  key={item.id}
+                  href={item.href}
+                  className={`py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${
+                    item.id === 'overview'
+                      ? 'border-[#001e62] text-[#001e62]'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <span className="mr-2">{item.icon}</span>
+                  {item.name}
+                </Link>
+              ))}
+            </nav>
+          </div>
+        </div>
+
+        {/* Stats Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
             <div className="flex items-center">
-              <div className="p-3 rounded-full bg-blue-100">
-                <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
+              <div className="p-3 rounded-full bg-[#001e62]/10 text-[#001e62]">
+                📚
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-600">Completed Courses</p>
+                <p className="text-2xl font-bold text-[#001e62]">{stats.completedCourses}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
+            <div className="flex items-center">
+              <div className="p-3 rounded-full bg-[#001e62]/10 text-[#001e62]">
+                🏆
               </div>
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-600">Certificates Earned</p>
-                <p className="text-2xl font-bold text-gray-900">{stats.totalCertificates}</p>
+                <p className="text-2xl font-bold text-[#001e62]">{stats.earnedCertificates}</p>
               </div>
             </div>
           </div>
 
-          <div className="bg-white p-6 rounded-lg shadow">
+          <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
             <div className="flex items-center">
-              <div className="p-3 rounded-full bg-green-100">
-                <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                </svg>
+              <div className="p-3 rounded-full bg-[#001e62]/10 text-[#001e62]">
+                📝
               </div>
               <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">Courses Completed</p>
-                <p className="text-2xl font-bold text-gray-900">{stats.totalCoursesCompleted}</p>
+                <p className="text-sm font-medium text-gray-600">Exam Attempts</p>
+                <p className="text-2xl font-bold text-[#001e62]">{stats.examAttempts}</p>
               </div>
             </div>
           </div>
 
-          <div className="bg-white p-6 rounded-lg shadow">
+          <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
             <div className="flex items-center">
-              <div className="p-3 rounded-full bg-purple-100">
-                <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
+              <div className="p-3 rounded-full bg-[#001e62]/10 text-[#001e62]">
+                💰
               </div>
               <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">Success Rate</p>
-                <p className="text-2xl font-bold text-gray-900">
-                  {stats.totalCoursesCompleted > 0 
-                    ? Math.round((stats.totalCertificates / stats.totalCoursesCompleted) * 100)
-                    : 0}%
-                </p>
+                <p className="text-sm font-medium text-gray-600">Total Invested</p>
+                <p className="text-2xl font-bold text-[#001e62]">${stats.totalSpent}</p>
               </div>
             </div>
-          </div>
-
-          <div className="bg-white p-6 rounded-lg shadow">
-            <Link href="/courses" className="flex items-center h-full">
-              <div className="p-3 rounded-full bg-orange-100">
-                <svg className="w-6 h-6 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">Take New Exam</p>
-                <p className="text-lg font-semibold text-orange-600">Browse Certificates</p>
-              </div>
-            </Link>
           </div>
         </div>
 
-        {/* My Certificates */}
-        <div className="mb-8">
-          <h2 className="text-2xl font-bold text-gray-900 mb-6">My Certificates</h2>
-          {certificates.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {certificates.map((certificate) => (
-                <div key={certificate.id} className="bg-white rounded-lg shadow-md overflow-hidden">
-                  {certificate.course.thumbnail && (
-                    <Image
-                      src={certificate.course.thumbnail}
-                      alt={certificate.course.title}
-                      width={400}
-                      height={200}
-                      className="w-full h-32 object-cover"
-                    />
-                  )}
-                  <div className="p-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm text-blue-600 font-medium">{certificate.course.category}</span>
-                      <span className="text-sm font-bold text-green-600">{certificate.score.toFixed(1)}%</span>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Recent Certificates */}
+          <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold text-[#001e62]">Recent Certificates</h2>
+              <Link href="/dashboard/certificates" className="text-[#001e62] hover:text-[#001e62]/80 text-sm font-medium">
+                View All
+              </Link>
+            </div>
+
+            {dashboardData?.certificates.length === 0 ? (
+              <div className="text-center py-8">
+                <div className="text-gray-400 text-4xl mb-2">🎓</div>
+                <p className="text-gray-600">No certificates earned yet</p>
+                <p className="text-gray-500 text-sm mt-1">Complete courses and pass exams to earn certificates</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {dashboardData?.certificates.slice(0, 3).map((certificate) => (
+                  <div key={certificate.id} className="flex items-center justify-between p-4 bg-[#001e62]/5 rounded-lg border border-[#001e62]/10">
+                    <div>
+                      <h3 className="font-medium text-[#001e62]">{certificate.course.title}</h3>
+                      <p className="text-sm text-gray-600">Score: {certificate.score.toFixed(1)}%</p>
+                      <p className="text-sm text-gray-500">Issued: {formatDate(certificate.issuedAt)}</p>
                     </div>
-                    <h3 className="font-semibold text-gray-900 mb-2">{certificate.course.title}</h3>
-                    <p className="text-sm text-gray-600 mb-3">
-                      Issued: {new Date(certificate.issuedAt).toLocaleDateString()}
-                    </p>
-                    <p className="text-xs text-gray-500 mb-3">
-                      Certificate ID: {certificate.certificateNumber}
-                    </p>
-                    <div className="flex space-x-2">
-                      <button
-                        onClick={() => downloadCertificate(certificate)}
-                        className="flex-1 py-2 px-3 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
-                      >
-                        Download
-                      </button>
+                    <div className="flex items-center space-x-2">
+                      {certificate.pdfPath && (
+                        <a
+                          href={certificate.pdfPath}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[#001e62] hover:text-[#001e62]/80 text-sm"
+                        >
+                          Download
+                        </a>
+                      )}
                       <Link
                         href={`/verify/${certificate.certificateNumber}`}
-                        className="flex-1 py-2 px-3 bg-gray-200 text-gray-700 text-sm rounded text-center hover:bg-gray-300"
+                        className="text-[#001e62] hover:text-[#001e62]/80 text-sm"
                       >
                         Verify
                       </Link>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-center py-12 bg-white rounded-lg">
-              <svg className="w-16 h-16 text-gray-300 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">No Certificates Yet</h3>
-              <p className="text-gray-600 mb-4">Start taking exams to earn your first certificate!</p>
-              <Link
-                href="/courses"
-                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
-              >
-                Browse Available Exams
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Completed Courses */}
+          <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold text-[#001e62]">Completed Courses</h2>
+              <Link href="/dashboard/courses" className="text-[#001e62] hover:text-[#001e62]/80 text-sm font-medium">
+                View All
               </Link>
             </div>
-          )}
+
+            {dashboardData?.completions.length === 0 ? (
+              <div className="text-center py-8">
+                <div className="text-gray-400 text-4xl mb-2">📚</div>
+                <p className="text-gray-600">No completed courses yet</p>
+                <p className="text-gray-500 text-sm mt-1">Complete courses on the main website to see them here</p>
+                <Link
+                  href="/dashboard/courses"
+                  className="mt-3 inline-block bg-[#001e62] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#001e62]/90"
+                >
+                  Browse Courses
+                </Link>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {dashboardData?.completions.slice(0, 3).map((completion) => (
+                  <div key={completion.id} className="flex items-center justify-between p-4 bg-[#001e62]/5 rounded-lg border border-[#001e62]/10">
+                    <div className="flex items-center">
+                      {completion.course.thumbnail ? (
+                        <Image
+                          src={completion.course.thumbnail}
+                          alt={completion.course.title}
+                          width={48}
+                          height={48}
+                          className="w-12 h-12 rounded object-cover"
+                        />
+                      ) : (
+                        <div className="w-12 h-12 bg-[#001e62] rounded flex items-center justify-center">
+                          <span className="text-white text-sm font-bold">
+                            {completion.course.title.charAt(0)}
+                          </span>
+                        </div>
+                      )}
+                      <div className="ml-4">
+                        <h3 className="font-medium text-[#001e62]">{completion.course.title}</h3>
+                        <p className="text-sm text-gray-600">{completion.course.category}</p>
+                        <p className="text-sm text-gray-500">Completed: {formatDate(completion.completedAt)}</p>
+                      </div>
+                    </div>
+                    <Link
+                      href={`/dashboard/courses/${completion.courseId}`}
+                      className="bg-[#001e62] text-white px-3 py-1 rounded text-sm font-medium hover:bg-[#001e62]/90"
+                    >
+                      Get Certificate
+                    </Link>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Completed Courses (Available for Certification) */}
-        {completedCourses.length > 0 && (
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-6">Ready for Certification</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {completedCourses.map((completion) => (
-                <div key={completion.id} className="bg-white rounded-lg shadow-md overflow-hidden">
-                  {completion.course.thumbnail && (
-                    <Image
-                      src={completion.course.thumbnail}
-                      alt={completion.course.title}
-                      width={400}
-                      height={200}
-                      className="w-full h-32 object-cover"
-                    />
-                  )}
-                  <div className="p-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm text-green-600 font-medium">{completion.course.category}</span>
-                      <span className="text-sm text-green-600">Completed</span>
-                    </div>
-                    <h3 className="font-semibold text-gray-900 mb-2">{completion.course.title}</h3>
-                    <p className="text-sm text-gray-600 mb-3">
-                      Completed: {new Date(completion.completedAt).toLocaleDateString()}
-                    </p>
-                    <div className="flex items-center justify-between">
-                      <span className="text-lg font-bold text-blue-600">${completion.course.certificatePrice}</span>
-                      <Link
-                        href={`/certificate/${completion.course.id}`}
-                        className="py-2 px-4 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
-                      >
-                        Take Exam
-                      </Link>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
+        {/* Quick Actions */}
+        <div className="mt-8 bg-white rounded-lg shadow-sm p-6 border border-gray-200">
+          <h2 className="text-xl font-bold text-[#001e62] mb-6">Quick Actions</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Link
+              href="/dashboard/courses"
+              className="flex items-center p-4 border border-gray-200 rounded-lg hover:border-[#001e62]/30 hover:shadow-md transition-all"
+            >
+              <div className="p-2 bg-[#001e62]/10 rounded text-[#001e62] mr-4">
+                📚
+              </div>
+              <div>
+                <h3 className="font-medium text-[#001e62]">Browse Courses</h3>
+                <p className="text-sm text-gray-600">Find courses available for certification</p>
+              </div>
+            </Link>
+
+            <Link
+              href="/dashboard/certificates"
+              className="flex items-center p-4 border border-gray-200 rounded-lg hover:border-[#001e62]/30 hover:shadow-md transition-all"
+            >
+              <div className="p-2 bg-[#001e62]/10 rounded text-[#001e62] mr-4">
+                🏆
+              </div>
+              <div>
+                <h3 className="font-medium text-[#001e62]">My Certificates</h3>
+                <p className="text-sm text-gray-600">View and download your earned certificates</p>
+              </div>
+            </Link>
+
+            <Link
+              href="/dashboard/profile"
+              className="flex items-center p-4 border border-gray-200 rounded-lg hover:border-[#001e62]/30 hover:shadow-md transition-all"
+            >
+              <div className="p-2 bg-[#001e62]/10 rounded text-[#001e62] mr-4">
+                👤
+              </div>
+              <div>
+                <h3 className="font-medium text-[#001e62]">Profile Settings</h3>
+                <p className="text-sm text-gray-600">Update your account information</p>
+              </div>
+            </Link>
           </div>
-        )}
+        </div>
       </div>
     </div>
   )

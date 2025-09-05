@@ -18,7 +18,7 @@ const nextConfig = {
     ]
   },
   images: {
-    domains: ['localhost', 'your-domain.com', 'lh3.googleusercontent.com']
+    domains: ['localhost', 'your-domain.com', 'lh3.googleusercontent.com', 'images.unsplash.com']
   },
   env: {
     NEXTAUTH_URL: process.env.NEXTAUTH_URL,

@@ -1,14 +1,28 @@
 // lib/examSecurity.ts
-import { PrismaClient } from '@prisma/client';
+import { prisma } from './prisma';
 import crypto from 'crypto';
 
-const prisma = new PrismaClient();
+interface BrowserData {
+  userAgent: string;
+  screen: {
+    width: number;
+    height: number;
+  };
+  timezone: string;
+}
+
+interface MonitoringData {
+  tabSwitched?: boolean;
+  windowBlurred?: boolean;
+  fullscreenExit?: boolean;
+  copyPasteAttempt?: boolean;
+}
 
 export class ExamSecurityService {
   private encryptionKey: string;
 
   constructor() {
-    this.encryptionKey = process.env.ENCRYPTION_KEY!;
+    this.encryptionKey = process.env.ENCRYPTION_KEY || 'default-key';
   }
 
   // Generate browser fingerprint for exam session
@@ -18,7 +32,7 @@ export class ExamSecurityService {
   }
 
   // Start secure exam session
-  async startExamSession(userId: string, courseId: string, browserData: any, ipAddress: string) {
+  async startExamSession(userId: string, courseId: string, browserData: BrowserData, ipAddress: string) {
     try {
       // Check if user has paid for exam
       const payment = await prisma.payment.findFirst({
@@ -93,7 +107,7 @@ export class ExamSecurityService {
   }
 
   // Validate exam session security during exam
-  async validateSession(sessionId: string, browserData: any, ipAddress: string): Promise<boolean> {
+  async validateSession(sessionId: string, browserData: BrowserData, ipAddress: string): Promise<boolean> {
     try {
       const session = await prisma.examSession.findUnique({
         where: { id: sessionId },
@@ -142,7 +156,7 @@ export class ExamSecurityService {
 
       if (!session) return;
 
-      const violations = session.violations as any[] || [];
+      const violations = (session.violations as any[]) || [];
       violations.push({
         ...violation,
         timestamp: new Date(),
@@ -167,28 +181,31 @@ export class ExamSecurityService {
   // Terminate exam session
   async terminateSession(sessionId: string, reason: string) {
     try {
-      await prisma.examSession.update({
-        where: { id: sessionId },
-        data: {
-          status: 'TERMINATED',
-          endTime: new Date(),
-          violations: {
-            push: {
-              type: 'SESSION_TERMINATED',
-              reason,
-              timestamp: new Date(),
-            },
-          },
-        },
-      });
-
-      // Also update the exam attempt
       const session = await prisma.examSession.findUnique({
         where: { id: sessionId },
         include: { examAttempt: true },
       });
 
-      if (session?.examAttempt) {
+      if (!session) return;
+
+      const violations = (session.violations as any[]) || [];
+      violations.push({
+        type: 'SESSION_TERMINATED',
+        reason,
+        timestamp: new Date(),
+      });
+
+      await prisma.examSession.update({
+        where: { id: sessionId },
+        data: {
+          status: 'TERMINATED',
+          endTime: new Date(),
+          violations: violations,
+        },
+      });
+
+      // Also update the exam attempt
+      if (session.examAttempt) {
         await prisma.examAttempt.update({
           where: { id: session.examAttempt.id },
           data: {
@@ -207,7 +224,7 @@ export class ExamSecurityService {
   }
 
   // Monitor exam session (called periodically during exam)
-  async monitorSession(sessionId: string, monitoringData: any) {
+  async monitorSession(sessionId: string, monitoringData: MonitoringData) {
     try {
       const violations = [];
 
@@ -304,4 +321,3 @@ export class ExamSecurityService {
 }
 
 export const examSecurity = new ExamSecurityService();
-          

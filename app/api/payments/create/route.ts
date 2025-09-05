@@ -13,11 +13,16 @@ export async function POST(request: Request) {
 
     const { courseId } = await request.json();
     
+    if (!courseId) {
+      return NextResponse.json({ error: 'Course ID is required' }, { status: 400 });
+    }
+    
     const payment = await paymentService.createExamPayment(session.user.id, courseId);
     
     return NextResponse.json(payment);
   } catch (error) {
     console.error('Error creating payment:', error);
-    return NextResponse.json({ error: 'Failed to create payment' }, { status: 500 });
+    const errorMessage = error instanceof Error ? error.message : 'Failed to create payment';
+    return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 }

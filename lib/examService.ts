@@ -1,11 +1,8 @@
 // lib/examService.ts
-import { PrismaClient } from '@prisma/client';
+import { prisma } from './prisma';
 import PDFDocument from 'pdfkit';
 import fs from 'fs';
 import path from 'path';
-import crypto from 'crypto';
-
-const prisma = new PrismaClient();
 
 export class ExamService {
   // Get exam questions for a course
