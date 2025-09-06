@@ -2,7 +2,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
     experimental: {
-    serverComponentsExternalPackages: ['@prisma/client']
+    serverComponentsExternalPackages: ["@prisma/client", "bcryptjs"],
+    esmExternals: "loose",
   },
   async headers() {
     return [
