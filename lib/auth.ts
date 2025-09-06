@@ -7,6 +7,28 @@ import { prisma } from "./prisma"
 import bcrypt from "bcryptjs"
 import { courseIntegration } from "./courseIntegration"
 
+// Build-time guard to prevent database calls during Vercel build
+const isBuildTime = process.env.NODE_ENV === 'production' && !process.env.VERCEL_ENV
+
+// Safe database helper with timeout and error handling
+const safeDbQuery = async <T>(query: () => Promise<T>, timeoutMs: number = 5000): Promise<T | null> => {
+  if (isBuildTime) {
+    return null
+  }
+  
+  try {
+    return await Promise.race([
+      query(),
+      new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error('Database timeout')), timeoutMs)
+      )
+    ])
+  } catch (error) {
+    console.error("Database query error:", error)
+    return null
+  }
+}
+
 export const authOptions: NextAuthOptions = {
   adapter: PrismaAdapter(prisma),
   providers: [
@@ -22,6 +44,11 @@ export const authOptions: NextAuthOptions = {
         loginType: { label: "Login Type", type: "text" } // 'course' or 'direct'
       },
       async authorize(credentials) {
+        // Skip during build time
+        if (isBuildTime) {
+          return null
+        }
+        
         if (!credentials?.email || !credentials?.password) {
           return null
         }
@@ -44,18 +71,20 @@ export const authOptions: NextAuthOptions = {
           }
 
           // Direct login to certificate platform
-          const user = await prisma.user.findUnique({
-            where: { email: credentials.email },
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              role: true,
-              password: true,
-              image: true,
-              courseUserId: true
-            }
-          })
+          const user = await safeDbQuery(() => 
+            prisma.user.findUnique({
+              where: { email: credentials.email },
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                role: true,
+                password: true,
+                image: true,
+                courseUserId: true
+              }
+            })
+          )
 
           if (!user || !user.password) {
             return null
@@ -94,6 +123,17 @@ export const authOptions: NextAuthOptions = {
     async jwt({ token, user, account, trigger }) {
       const isProduction = process.env.NODE_ENV === 'production'
       
+      // Skip database operations during build time
+      if (isBuildTime) {
+        if (user) {
+          token.id = user.id
+          token.role = user.role
+          token.courseUserId = user.courseUserId
+          token.email = user.email
+        }
+        return token
+      }
+      
       if (!isProduction) {
         console.log("=== JWT Callback ===")
         console.log("Token before:", { id: token.id, email: token.email, sub: token.sub })
@@ -116,27 +156,20 @@ export const authOptions: NextAuthOptions = {
       if (!token.id && token.email) {
         if (!isProduction) console.log("Token missing ID, looking up by email:", token.email)
         
-        try {
-          const dbUser = await Promise.race([
-            prisma.user.findUnique({
-              where: { email: token.email },
-              select: { id: true, role: true, email: true, courseUserId: true }
-            }),
-            new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('Database timeout')), 8000)
-            )
-          ]) as any
-          
-          if (dbUser) {
-            if (!isProduction) console.log("Found user in DB:", dbUser.id)
-            token.id = dbUser.id
-            token.role = dbUser.role
-            token.courseUserId = dbUser.courseUserId
-          } else {
-            console.warn("User not found in DB for email:", token.email)
-          }
-        } catch (error) {
-          console.error("Error fetching user by email:", error)
+        const dbUser = await safeDbQuery(() =>
+          prisma.user.findUnique({
+            where: { email: token.email },
+            select: { id: true, role: true, email: true, courseUserId: true }
+          })
+        )
+        
+        if (dbUser) {
+          if (!isProduction) console.log("Found user in DB:", dbUser.id)
+          token.id = dbUser.id
+          token.role = dbUser.role
+          token.courseUserId = dbUser.courseUserId
+        } else if (!isProduction) {
+          console.warn("User not found in DB for email:", token.email)
         }
       }
 
@@ -156,6 +189,17 @@ export const authOptions: NextAuthOptions = {
     async session({ session, token }) {
       const isProduction = process.env.NODE_ENV === 'production'
       
+      // Skip database operations during build time
+      if (isBuildTime) {
+        if (session.user) {
+          session.user.id = token.id as string || token.sub as string
+          session.user.role = (token.role as string) || 'STUDENT'
+          session.user.courseUserId = token.courseUserId as string
+          session.user.email = token.email as string || session.user.email
+        }
+        return session
+      }
+      
       if (!isProduction) {
         console.log("=== Session Callback ===")
         console.log("Token:", { id: token.id, email: token.email, role: token.role, sub: token.sub })
@@ -170,35 +214,28 @@ export const authOptions: NextAuthOptions = {
           userId = token.sub as string
         }
         
-        // Last resort: lookup by email (with caching)
+        // Last resort: lookup by email (with safe query)
         if (!userId && token.email && session.user.email) {
-          try {
-            const dbUser = await Promise.race([
-              prisma.user.findUnique({
-                where: { email: session.user.email },
-                select: { id: true, role: true, courseUserId: true }
-              }),
-              new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Database timeout')), 5000)
-              )
-            ]) as any
-            
-            if (dbUser) {
-              userId = dbUser.id
-              // Update token for future requests
-              token.id = dbUser.id
-              token.role = dbUser.role
-              token.courseUserId = dbUser.courseUserId
-            }
-          } catch (error) {
-            console.error("Session: Error fetching user:", error)
+          const dbUser = await safeDbQuery(() =>
+            prisma.user.findUnique({
+              where: { email: session.user.email! },
+              select: { id: true, role: true, courseUserId: true }
+            })
+          )
+          
+          if (dbUser) {
+            userId = dbUser.id
+            // Update token for future requests
+            token.id = dbUser.id
+            token.role = dbUser.role
+            token.courseUserId = dbUser.courseUserId
           }
         }
 
         // Set session data
         session.user.id = userId
         session.user.role = (token.role as string) || 'STUDENT'
-        session.user.courseUserId = token.courseUserId as string
+        session.user.courseUserId = token.courseUserId ?? undefined
         session.user.email = token.email as string || session.user.email
         
         if (!isProduction) {
@@ -217,6 +254,11 @@ export const authOptions: NextAuthOptions = {
     async signIn({ user, account, profile }) {
       const isProduction = process.env.NODE_ENV === 'production'
       
+      // Skip database operations during build time
+      if (isBuildTime) {
+        return true
+      }
+      
       if (!isProduction) {
         console.log("=== SignIn Callback ===")
         console.log("User:", { id: user.id, email: user.email })
@@ -225,30 +267,29 @@ export const authOptions: NextAuthOptions = {
       
       // Enhanced OAuth handling
       if (account?.provider === "google" && user.email) {
-        try {
-          // Check if user exists
-          const existingUser = await prisma.user.findUnique({
-            where: { email: user.email },
+        const existingUser = await safeDbQuery(() =>
+          prisma.user.findUnique({
+            where: { email: user.email! },
             select: { id: true, name: true, image: true }
           })
+        )
+        
+        if (existingUser) {
+          // Update user ID to ensure consistency
+          user.id = existingUser.id
           
-          if (existingUser) {
-            // Update user ID to ensure consistency
-            user.id = existingUser.id
-            
-            // Update profile information if needed
-            if (!existingUser.name && user.name) {
-              await prisma.user.update({
+          // Update profile information if needed
+          if (!existingUser.name && user.name) {
+            await safeDbQuery(() =>
+              prisma.user.update({
                 where: { id: existingUser.id },
                 data: { 
                   name: user.name,
                   image: user.image 
                 }
               })
-            }
+            )
           }
-        } catch (error) {
-          console.error("SignIn callback error:", error)
         }
       }
       
@@ -302,7 +343,7 @@ export const authOptions: NextAuthOptions = {
   
   events: {
     async signIn(message) {
-      if (process.env.NODE_ENV === 'production') {
+      if (!isBuildTime && process.env.NODE_ENV === 'production') {
         console.log("✅ SignIn event:", {
           user: message.user.email,
           account: message.account?.provider
@@ -310,12 +351,12 @@ export const authOptions: NextAuthOptions = {
       }
     },
     async signOut(message) {
-      if (process.env.NODE_ENV === 'production') {
+      if (!isBuildTime && process.env.NODE_ENV === 'production') {
         console.log("👋 SignOut event:", message.token?.email)
       }
     },
     async session(message) {
-      if (process.env.NODE_ENV === 'production' && !message.session?.user?.id) {
+      if (!isBuildTime && process.env.NODE_ENV === 'production' && !message.session?.user?.id) {
         console.error("⚠️ Session missing user ID:", message.session?.user?.email)
       }
     }
