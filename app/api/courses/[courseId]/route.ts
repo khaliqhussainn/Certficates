@@ -4,7 +4,7 @@ import { getServerSession } from "next-auth"
 import { NextRequest, NextResponse } from "next/server"
 
 // app/api/courses/[courseId]/route.ts - Get specific course details
-export async function GET_COURSE_DETAIL(
+export async function GET(
   request: NextRequest,
   { params }: { params: { courseId: string } }
 ) {

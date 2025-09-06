@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
         name,
         email,
         password: hashedPassword,
-        role: 'USER'
+        role: 'STUDENT' // Changed from 'USER' to 'STUDENT'
       },
       select: {
         id: true,

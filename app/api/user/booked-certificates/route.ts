@@ -13,13 +13,19 @@ export async function GET() {
     }
 
     // Get courses that user has paid for (booked certificate exams)
+    // Only include payments that have a courseId
     const payments = await prisma.payment.findMany({
       where: {
         userId: session.user.id,
-        status: 'COMPLETED'
+        status: 'COMPLETED',
+        courseId: {
+          not: null // Only get payments with a courseId
+        }
       },
       include: {
-        course: true
+        // Since courseId is optional in the schema, we need to handle the relation carefully
+        // Note: Prisma won't include the course relation automatically if courseId can be null
+        // We'll fetch course data separately
       },
       orderBy: { createdAt: 'desc' }
     })
@@ -27,6 +33,16 @@ export async function GET() {
     const bookedCourses = []
 
     for (const payment of payments) {
+      // Skip if courseId is null (shouldn't happen with our where clause, but type safety)
+      if (!payment.courseId) continue
+
+      // Get course data
+      const course = await prisma.course.findUnique({
+        where: { id: payment.courseId }
+      })
+
+      if (!course) continue // Skip if course not found
+
       // Get additional data for each course
       const [completion, certificate, examAttempts] = await Promise.all([
         prisma.courseCompletion.findUnique({
@@ -54,7 +70,7 @@ export async function GET() {
       ])
 
       bookedCourses.push({
-        ...payment.course,
+        ...course,
         payment: {
           id: payment.id,
           amount: payment.amount,

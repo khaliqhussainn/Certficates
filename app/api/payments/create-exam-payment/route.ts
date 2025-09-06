@@ -83,7 +83,12 @@ export async function POST(request: NextRequest) {
         currency: 'USD',
         status: 'PENDING',
         stripePaymentIntentId: paymentIntent.id,
-        type: 'CERTIFICATE_EXAM'
+        // Removed 'type' field as it doesn't exist in the schema
+        // You can store this info in the metadata field instead
+        metadata: {
+          type: 'CERTIFICATE_EXAM',
+          courseTitle: course.title
+        }
       }
     })
 
