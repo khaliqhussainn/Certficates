@@ -77,10 +77,10 @@ export default function Header() {
                   <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all">
                     <div className="py-2">
                       <Link
-                        href="/dashboard/profile"
+                        href="/dashboard"
                         className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
                       >
-                        Profile
+                        Dashboard
                       </Link>
                       <Link
                         href="/dashboard/certificates"

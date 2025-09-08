@@ -1,36 +1,60 @@
-// app/api/exam/start/route.ts - Start secure exam session
-import { NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
-import { examSecurity } from '@/lib/examSecurity';
+// app/api/exam/start/route.ts
+import { NextResponse } from 'next/server'
+import { getServerSession } from 'next-auth'
+import { authOptions } from '@/lib/auth'
+import { prisma } from '@/lib/prisma'
 
 export async function POST(request: Request) {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await getServerSession(authOptions)
     if (!session?.user?.id) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { courseId, browserData } = await request.json();
-    const ipAddress = request.headers.get('x-forwarded-for') || 'localhost';
+    const { sessionId } = await request.json()
 
-    const examSession = await examSecurity.startExamSession(
-      session.user.id,
-      courseId,
-      browserData,
-      ipAddress
-    );
+    if (!sessionId) {
+      return NextResponse.json({ error: 'Session ID is required' }, { status: 400 })
+    }
 
-    return NextResponse.json(examSession);
+    // Update exam session to started
+    const examSession = await prisma.examSession.update({
+      where: {
+        id: sessionId,
+        userId: session.user.id
+      },
+      data: {
+        status: 'IN_PROGRESS',
+        startTime: new Date()
+      }
+    })
+
+    // Create exam attempt record
+    const examAttempt = await prisma.examAttempt.create({
+      data: {
+        userId: session.user.id,
+        courseId: examSession.courseId,
+        sessionId: sessionId,
+        startedAt: new Date()
+      }
+    })
+
+    // Link exam attempt to session
+    await prisma.examSession.update({
+      where: { id: sessionId },
+      data: { examAttemptId: examAttempt.id }
+    })
+
+    return NextResponse.json({ 
+      success: true,
+      examAttemptId: examAttempt.id 
+    })
+
   } catch (error) {
-    console.error('Error starting exam:', error);
-    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    console.error('Error starting exam:', error)
     return NextResponse.json(
-      { error: message },
+      { error: 'Failed to start exam' }, 
       { status: 500 }
-    );
+    )
   }
 }
