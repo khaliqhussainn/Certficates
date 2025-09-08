@@ -1,103 +1,117 @@
-// app/api/exam/create-session/route.ts
-import { NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
+// app/api/exam/create-session/route.ts - Updated to check payment
+import { NextRequest, NextResponse } from 'next/server'
+import { getServerSession } from 'next-auth/next'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { headers } from 'next/headers'
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { courseId } = await request.json()
-    
+    const body = await request.json()
+    const { courseId } = body
+
     if (!courseId) {
       return NextResponse.json({ error: 'Course ID is required' }, { status: 400 })
     }
 
-    // Check if course exists and is published
-    const course = await prisma.course.findFirst({
+    // Check if user has paid for this course
+    const payment = await prisma.payment.findFirst({
       where: {
-        id: courseId,
-        isPublished: true,
-        certificateEnabled: true
+        userId: session.user.id,
+        courseId,
+        status: 'COMPLETED'
+      }
+    })
+
+    if (!payment) {
+      return NextResponse.json(
+        { error: 'Payment required to access this exam' },
+        { status: 403 }
+      )
+    }
+
+    // Get course details
+    const course = await prisma.course.findUnique({
+      where: { id: courseId },
+      select: {
+        id: true,
+        title: true,
+        examDuration: true,
+        totalQuestions: true,
+        passingScore: true
       }
     })
 
     if (!course) {
-      return NextResponse.json({ error: 'Course not found or not available for certification' }, { status: 404 })
-    }
-
-    // Check if user has completed the course
-    const completion = await prisma.courseCompletion.findFirst({
-      where: {
-        userId: session.user.id,
-        courseId: courseId
-      }
-    })
-
-    if (!completion) {
-      return NextResponse.json({ error: 'Course must be completed before taking exam' }, { status: 403 })
+      return NextResponse.json({ error: 'Course not found' }, { status: 404 })
     }
 
     // Check for existing active session
     const existingSession = await prisma.examSession.findFirst({
       where: {
         userId: session.user.id,
-        courseId: courseId,
-        status: 'IN_PROGRESS'
+        courseId,
+        status: { in: ['PENDING', 'IN_PROGRESS'] }
       }
     })
 
     if (existingSession) {
-      return NextResponse.json({ 
+      return NextResponse.json({
+        success: true,
         session: {
-          ...existingSession,
-          courseName: course.title
+          id: existingSession.id,
+          courseId: existingSession.courseId,
+          courseName: course.title,
+          status: existingSession.status,
+          startedAt: existingSession.startTime,
+          expiresAt: existingSession.endTime,
+          violations: 0,
+          duration: course.examDuration,
+          totalQuestions: course.totalQuestions,
+          passingScore: course.passingScore
         }
       })
     }
-
-    // Get client IP and user agent
-    const headersList = headers()
-    const ipAddress = headersList.get('x-forwarded-for') || headersList.get('x-real-ip') || 'unknown'
-    const userAgent = headersList.get('user-agent') || 'unknown'
 
     // Create new exam session
     const examSession = await prisma.examSession.create({
       data: {
         userId: session.user.id,
-        courseId: courseId,
+        courseId,
         status: 'PENDING',
         timeRemaining: course.examDuration,
-        ipAddress: ipAddress,
-        browserFingerprint: Buffer.from(userAgent).toString('base64'),
+        browserFingerprint: request.headers.get('user-agent') || '',
+        ipAddress: request.headers.get('x-forwarded-for') || 
+                   request.headers.get('x-real-ip') || 
+                   'unknown',
         isMonitored: true
       }
     })
 
     return NextResponse.json({
+      success: true,
       session: {
         id: examSession.id,
         courseId: examSession.courseId,
         courseName: course.title,
         status: examSession.status,
+        startedAt: examSession.startTime,
+        expiresAt: examSession.endTime,
+        violations: 0,
         duration: course.examDuration,
         totalQuestions: course.totalQuestions,
-        passingScore: course.passingScore,
-        startedAt: examSession.createdAt.toISOString(),
-        expiresAt: new Date(Date.now() + (course.examDuration + 10) * 60 * 1000).toISOString(),
-        violations: 0
+        passingScore: course.passingScore
       }
     })
 
   } catch (error) {
-    console.error('Error creating exam session:', error)
+    console.error('Exam session creation error:', error)
     return NextResponse.json(
-      { error: 'Failed to create exam session' }, 
+      { error: 'Failed to create exam session' },
       { status: 500 }
     )
   }

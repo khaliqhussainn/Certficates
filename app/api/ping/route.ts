@@ -1,4 +1,4 @@
-// app/api/ping/route.ts
+// app/api/ping/route.ts - For connection testing
 import { NextResponse } from 'next/server'
 
 export async function HEAD() {

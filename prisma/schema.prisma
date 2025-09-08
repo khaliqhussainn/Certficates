@@ -1,4 +1,4 @@
-// Certificate Platform: prisma/schema.prisma
+// prisma/schema.prisma - Updated Payment model for Saudi providers
 generator client {
   provider = "prisma-client-js"
 }
@@ -40,7 +40,7 @@ model Course {
   level               Level
   thumbnail           String?
   isPublished         Boolean  @default(false)
-  certificatePrice    Float    @default(99.00) // Price in USD for certificate exam
+  certificatePrice    Float    @default(99.00) // Price in SAR for certificate exam
   certificateDiscount Float?   @default(0) // Discount percentage
   certificateEnabled  Boolean  @default(true) // Whether certificates are enabled
   passingScore        Int      @default(70) // Percentage needed to pass
@@ -57,6 +57,8 @@ model Course {
   examAttempts      ExamAttempt[]
   certificates      Certificate[]
   courseCompletions CourseCompletion[]
+  examSessions      ExamSession[]
+  payments          Payment[] // Added relation to payments
 
   @@map("courses")
 }
@@ -96,7 +98,7 @@ model ExamQuestion {
   updatedAt     DateTime   @updatedAt
 
   course      Course       @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  examAnswers ExamAnswer[]
+  examAnswers ExamAnswer[] @relation("QuestionToAnswers")
 
   @@map("exam_questions")
 }
@@ -122,7 +124,9 @@ model ExamSession {
   updatedAt          DateTime   @updatedAt
 
   user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  examAttempt ExamAttempt?
+  course      Course       @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  
+  examAttempt ExamAttempt? @relation("SessionToAttempt")
 
   @@map("exam_sessions")
 }
@@ -142,9 +146,9 @@ model ExamAttempt {
 
   user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   course      Course       @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  session     ExamSession? @relation(fields: [sessionId], references: [id])
+  session     ExamSession? @relation("SessionToAttempt", fields: [sessionId], references: [id])
   certificate Certificate?
-  answers     ExamAnswer[]
+  answers     ExamAnswer[] @relation("AttemptToAnswers")
 
   @@map("exam_attempts")
 }
@@ -159,8 +163,8 @@ model ExamAnswer {
   timeSpent      Int? // Seconds spent on question
   createdAt      DateTime @default(now())
 
-  examAttempt ExamAttempt  @relation(fields: [examAttemptId], references: [id], onDelete: Cascade)
-  question    ExamQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  examAttempt ExamAttempt  @relation("AttemptToAnswers", fields: [examAttemptId], references: [id], onDelete: Cascade)
+  question    ExamQuestion @relation("QuestionToAnswers", fields: [questionId], references: [id], onDelete: Cascade)
 
   @@unique([examAttemptId, questionId])
   @@map("exam_answers")
@@ -192,22 +196,25 @@ model Certificate {
   @@map("certificates")
 }
 
-// Payment processing for exam fees
+// UPDATED: Payment processing for Saudi exam fees
 model Payment {
   id                    String        @id @default(cuid())
   userId                String
-  courseId              String?
+  courseId              String        // Made required for course payments
   amount                Float
-  currency              String        @default("USD")
+  currency              String        @default("SAR") // Changed to SAR
   status                PaymentStatus @default(PENDING)
-  paymentMethod         String? // stripe, paypal, etc.
-  stripePaymentId       String?
-  stripePaymentIntentId String?       @unique
-  metadata              Json?
+  provider              String        // moyasar, tap - ADDED THIS FIELD
+  providerPaymentId     String        // Payment ID from provider - ADDED
+  providerTransactionId String?       // Transaction ID from provider - ADDED
+  paymentMethod         String?       // Credit card, MADA, etc.
+  metadata              Json?         // Additional payment data
   createdAt             DateTime      @default(now())
   updatedAt             DateTime      @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Relations
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
 
   @@map("payments")
 }
