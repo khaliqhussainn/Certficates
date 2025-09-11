@@ -1,7 +1,7 @@
-// next.config.js - Next.js Configuration
+// next.config.js - Updated Configuration
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-    experimental: {
+  experimental: {
     serverComponentsExternalPackages: ["@prisma/client", "bcryptjs"],
     esmExternals: "loose",
   },
@@ -13,7 +13,12 @@ const nextConfig = {
           { key: 'X-Frame-Options', value: 'DENY' },
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'Referrer-Policy', value: 'no-referrer' },
-          { key: 'Content-Security-Policy', value: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'" }
+          { 
+            key: 'Content-Security-Policy', 
+            value: process.env.NODE_ENV === 'development' 
+              ? "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'"
+              : "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
+          }
         ]
       }
     ]
@@ -27,5 +32,3 @@ const nextConfig = {
 }
 
 module.exports = nextConfig
-
-
