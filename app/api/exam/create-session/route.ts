@@ -1,4 +1,4 @@
-// app/api/exam/create-session/route.ts - FIXED VERSION
+// app/api/exam/create-session/route.ts - UPDATED (Remove completion check)
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
@@ -31,20 +31,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Course not found or not available for certification' }, { status: 404 })
     }
 
-    // REMOVED: Course completion requirement for testing
-    // You can add this back later when you have course completions set up
-    /*
-    const completion = await prisma.courseCompletion.findFirst({
+    // REMOVED: Course completion requirement
+    // Users can now take the certificate exam without completing the course
+    
+    // Check if user has paid for the exam
+    const payment = await prisma.payment.findFirst({
       where: {
         userId: session.user.id,
-        courseId: courseId
+        courseId: courseId,
+        status: 'COMPLETED'
       }
     })
 
-    if (!completion) {
-      return NextResponse.json({ error: 'Course must be completed before taking exam' }, { status: 403 })
+    if (!payment) {
+      return NextResponse.json({ 
+        error: 'Payment required for certificate exam. Please book your exam first.' 
+      }, { status: 403 })
     }
-    */
 
     // Check for existing active session
     const existingSession = await prisma.examSession.findFirst({
@@ -93,7 +96,8 @@ export async function POST(request: Request) {
         passingScore: course.passingScore,
         startedAt: examSession.createdAt.toISOString(),
         expiresAt: new Date(Date.now() + (course.examDuration + 10) * 60 * 1000).toISOString(),
-        violations: 0
+        violations: 0,
+        note: 'Course completion not required for this exam'
       }
     })
 

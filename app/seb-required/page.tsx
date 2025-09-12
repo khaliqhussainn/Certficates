@@ -1,15 +1,188 @@
-// app/seb-required/page.tsx - SEB Required Setup Page
+// app/seb-required/page.tsx - Enhanced SEB Setup Page
 'use client'
 import { useEffect, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
-import { Shield, Download, Monitor, AlertCircle, CheckCircle, ArrowRight, RefreshCw } from 'lucide-react'
-import { SEBConfigDownload, useSafeExamBrowser } from '@/components/SafeExamBrowser'
+import { Shield, Download, Monitor, AlertCircle, ArrowLeft, CheckCircle, ArrowRight, RefreshCw, AlertTriangle, Settings, Play } from 'lucide-react'
+
+// SEB Detection Hook
+function useSafeExamBrowser() {
+  const [sebInfo, setSebInfo] = useState({
+    isSEB: false,
+    isVerified: false,
+    version: '',
+    detectionMethod: 'none'
+  })
+
+  useEffect(() => {
+    const detectSEB = () => {
+      const win = window as any
+      let detected = false
+      let version = ''
+      let method = 'none'
+      let verified = false
+
+      // Modern SEB API
+      if (win.SafeExamBrowser_) {
+        detected = true
+        version = 'Modern API'
+        method = 'JavaScript API'
+        verified = true
+      }
+      // Legacy SEB
+      else if (win.SafeExamBrowser) {
+        detected = true
+        version = win.SafeExamBrowser.version || 'Legacy'
+        method = 'SafeExamBrowser Object'
+        verified = true
+      }
+      // User Agent fallback
+      else {
+        const userAgent = navigator.userAgent
+        const sebPatterns = [/SEB[\s\/][\d\.]+/i, /SafeExamBrowser/i, /Safe.*Exam.*Browser/i]
+        
+        if (sebPatterns.some(pattern => pattern.test(userAgent))) {
+          detected = true
+          const versionMatch = userAgent.match(/SEB[\s\/]([\d\.]+)/i)
+          version = versionMatch ? versionMatch[1] : 'Unknown'
+          method = 'User Agent'
+          verified = false
+        }
+      }
+
+      setSebInfo({ isSEB: detected, isVerified: verified, version, detectionMethod: method })
+    }
+
+    detectSEB()
+    const interval = setInterval(detectSEB, 2000)
+    return () => clearInterval(interval)
+  }, [])
+
+  return sebInfo
+}
+
+// SEB Config Generator
+function generateSEBConfig(courseId: string, examURL: string) {
+  const quitURL = `${new URL(examURL).origin}/courses/${courseId}`
+  
+  return {
+    startURL: examURL,
+    quitURL: quitURL,
+    sendBrowserExamKey: true,
+    allowQuit: true,
+    quitExamPasswordHash: btoa("admin123"),
+    quitExamText: "Enter administrator password to quit exam:",
+    
+    // Lockdown settings
+    ignoreExitKeys: true,
+    enableF1: false,
+    enableF3: false,
+    enableF12: false,
+    enableCtrlEsc: false,
+    enableAltEsc: false,
+    enableAltTab: false,
+    enableAltF4: false,
+    enableRightMouse: false,
+    enablePrintScreen: false,
+    enableEsc: false,
+    enableCtrlAltDel: false,
+    
+    // Browser restrictions
+    allowBrowsingBackForward: false,
+    allowReload: false,
+    showReloadButton: false,
+    allowAddressBar: false,
+    allowNavigationBar: false,
+    showNavigationButtons: false,
+    newBrowserWindowByLinkPolicy: 0,
+    newBrowserWindowByScriptPolicy: 0,
+    blockPopUpWindows: true,
+    
+    // Content restrictions
+    allowCopy: false,
+    allowCut: false,
+    allowPaste: false,
+    allowSpellCheck: false,
+    allowDictation: false,
+    
+    // Security
+    enableLogging: true,
+    logLevel: 2,
+    detectVirtualMachine: true,
+    allowVirtualMachine: false,
+    forceAppFolderInstall: true,
+    
+    // URL filtering
+    URLFilterEnable: true,
+    URLFilterEnableContentFilter: true,
+    urlFilterRules: [
+      { action: 1, active: true, expression: examURL.replace(/[.*+?^${}()|[\]\\]/g, "\\") },
+      { action: 1, active: true, expression: `${new URL(examURL).origin}/api/exam/*` },
+      { action: 0, active: true, expression: "*" }
+    ],
+    
+    // Process blocking
+    prohibitedProcesses: [
+      { active: true, currentUser: true, description: "Block OBS", executable: "obs", windowHandling: 1 },
+      { active: true, currentUser: true, description: "Block TeamViewer", executable: "TeamViewer", windowHandling: 1 },
+      { active: true, currentUser: true, description: "Block Discord", executable: "Discord", windowHandling: 1 },
+      { active: true, currentUser: true, description: "Block Chrome", executable: "chrome", windowHandling: 1 },
+      { active: true, currentUser: true, description: "Block Firefox", executable: "firefox", windowHandling: 1 }
+    ]
+  }
+}
+
+// SEB Config Download Component
+function SEBConfigDownload({ courseId, onConfigGenerated }: { courseId: string; onConfigGenerated?: () => void }) {
+  const [isGenerating, setIsGenerating] = useState(false)
+
+  const downloadConfig = async () => {
+    setIsGenerating(true)
+    try {
+      const baseURL = process.env.NEXT_PUBLIC_APP_URL || window.location.origin
+      const examURL = `${baseURL}/exam/${courseId}?seb=true`
+      const config = generateSEBConfig(courseId, examURL)
+      
+      const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/seb' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `secure_exam_${courseId}_config.seb`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      
+      onConfigGenerated?.()
+    } catch (error) {
+      console.error('Config generation error:', error)
+      alert('Failed to generate configuration. Please try again.')
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
+  return (
+    <button
+      onClick={downloadConfig}
+      disabled={isGenerating}
+      className="inline-flex items-center px-6 py-3 bg-[#001e62] text-white rounded-lg hover:bg-[#001e62]/90 transition-colors font-medium disabled:opacity-50"
+    >
+      {isGenerating ? (
+        <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2" />
+      ) : (
+        <Download className="w-4 h-4 mr-2" />
+      )}
+      {isGenerating ? 'Generating...' : 'Download SEB Config'}
+    </button>
+  )
+}
 
 export default function SEBRequiredPage() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const sebInfo = useSafeExamBrowser()
   const [isChecking, setIsChecking] = useState(false)
+  const [configDownloaded, setConfigDownloaded] = useState(false)
   
   const returnUrl = searchParams.get('returnUrl') || '/'
   const courseId = extractCourseIdFromUrl(returnUrl)
@@ -24,10 +197,38 @@ export default function SEBRequiredPage() {
     setTimeout(() => {
       setIsChecking(false)
       if (sebInfo.isSEB) {
-        // Redirect back to exam if SEB is now detected
         router.push(returnUrl + (returnUrl.includes('?') ? '&' : '?') + 'seb=true')
       }
     }, 2000)
+  }
+
+  const handleConfigDownloaded = () => {
+    setConfigDownloaded(true)
+    alert(`✅ SEB Configuration Downloaded Successfully!
+
+📋 NEXT STEPS:
+
+1️⃣ INSTALL SAFE EXAM BROWSER:
+   • Visit: https://safeexambrowser.org/download_en.html
+   • Download version 3.6+ for your OS
+   • Install with administrator privileges
+
+2️⃣ CLOSE ALL APPLICATIONS:
+   • Close ALL browser windows completely
+   • Exit messaging apps (WhatsApp, Discord, Telegram)
+   • Stop screen recording software (OBS, etc.)
+   • Close remote access tools (TeamViewer, etc.)
+
+3️⃣ START SECURE EXAM:
+   • Double-click the downloaded .seb file
+   • SEB will launch automatically in secure mode
+   • Your exam will load in the locked environment
+
+🔐 EMERGENCY ACCESS:
+   Admin Password: admin123
+   (Only use if you encounter technical issues)
+
+⚠️ IMPORTANT: Do not open any other applications after starting SEB!`)
   }
 
   useEffect(() => {
@@ -42,23 +243,23 @@ export default function SEBRequiredPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
       <div className="container mx-auto px-4 py-12">
-        <div className="max-w-4xl mx-auto">
+        <div className="max-w-5xl mx-auto">
           
           {/* Header */}
           <div className="text-center mb-12">
-            <div className="inline-flex items-center justify-center w-20 h-20 bg-blue-600 rounded-full mb-6">
+            <div className="inline-flex items-center justify-center w-20 h-20 bg-[#001e62] rounded-full mb-6">
               <Shield className="w-10 h-10 text-white" />
             </div>
             <h1 className="text-4xl font-bold text-gray-900 mb-4">
               Secure Exam Environment Required
             </h1>
-            <p className="text-xl text-gray-600 max-w-2xl mx-auto">
-              This certification exam requires Safe Exam Browser (SEB) to ensure test integrity 
-              and prevent cheating during your assessment.
+            <p className="text-xl text-gray-600 max-w-3xl mx-auto">
+              This professional certificate exam requires Safe Exam Browser (SEB) to ensure 
+              academic integrity and prevent unauthorized assistance during assessment.
             </p>
           </div>
 
-          {/* SEB Status */}
+          {/* SEB Status Card */}
           <div className="bg-white rounded-2xl shadow-xl p-8 mb-8">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-semibold text-gray-900">Safe Exam Browser Status</h2>
@@ -80,14 +281,15 @@ export default function SEBRequiredPage() {
                 <div className="text-green-700 space-y-2">
                   <p><strong>Version:</strong> {sebInfo.version}</p>
                   <p><strong>Detection Method:</strong> {sebInfo.detectionMethod}</p>
-                  <p><strong>Security Mode:</strong> {sebInfo.securityMode}</p>
+                  <p><strong>Security Status:</strong> {sebInfo.isVerified ? 'Verified' : 'Basic Detection'}</p>
                 </div>
                 <div className="mt-6">
                   <button
                     onClick={() => router.push(returnUrl + (returnUrl.includes('?') ? '&' : '?') + 'seb=true')}
-                    className="inline-flex items-center px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold"
+                    className="inline-flex items-center px-8 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold text-lg"
                   >
-                    Continue to Exam
+                    <Play className="w-5 h-5 mr-2" />
+                    Continue to Secure Exam
                     <ArrowRight className="w-5 h-5 ml-2" />
                   </button>
                 </div>
@@ -101,49 +303,57 @@ export default function SEBRequiredPage() {
                   </span>
                 </div>
                 <p className="text-red-700 mb-6">
-                  Safe Exam Browser must be installed and running to access this exam. 
+                  Safe Exam Browser must be installed and running to access this secure certificate exam. 
                   Please follow the setup instructions below.
                 </p>
-                <button
-                  onClick={handleCheckAgain}
-                  disabled={isChecking}
-                  className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:opacity-50"
-                >
-                  {isChecking ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                      Checking...
-                    </>
-                  ) : (
-                    <>
+                <div className="flex gap-4">
+                  <button
+                    onClick={handleCheckAgain}
+                    disabled={isChecking}
+                    className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:opacity-50"
+                  >
+                    {isChecking ? (
+                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2" />
+                    ) : (
                       <RefreshCw className="w-4 h-4 mr-2" />
-                      Check Again
-                    </>
+                    )}
+                    {isChecking ? 'Checking...' : 'Check Again'}
+                  </button>
+                  
+                  {process.env.NODE_ENV === 'development' && (
+                    <button
+                      onClick={() => router.push(returnUrl)}
+                      className="inline-flex items-center px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 font-medium"
+                    >
+                      <Settings className="w-4 h-4 mr-2" />
+                      Skip (Dev Mode)
+                    </button>
                   )}
-                </button>
+                </div>
               </div>
             )}
           </div>
 
           {!sebInfo.isSEB && (
             <>
-              {/* Setup Instructions */}
+              {/* Setup Steps */}
               <div className="grid md:grid-cols-2 gap-8 mb-8">
                 <div className="bg-white rounded-xl shadow-lg p-6">
                   <div className="flex items-center mb-4">
-                    <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center mr-3">
+                    <div className="w-10 h-10 bg-[#001e62] rounded-lg flex items-center justify-center mr-3">
                       <span className="text-white font-bold">1</span>
                     </div>
                     <h3 className="text-xl font-semibold">Download & Install SEB</h3>
                   </div>
                   <p className="text-gray-600 mb-4">
-                    Download the official Safe Exam Browser from the official website and install it with administrator privileges.
+                    Download the official Safe Exam Browser and install it with administrator privileges. 
+                    Ensure you get the latest version for optimal security.
                   </p>
                   <a
                     href="https://safeexambrowser.org/download_en.html"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+                    className="inline-flex items-center px-4 py-2 bg-[#001e62] text-white rounded-lg hover:bg-[#001e62]/90 font-medium"
                   >
                     <Monitor className="w-4 h-4 mr-2" />
                     Download SEB Browser
@@ -158,94 +368,111 @@ export default function SEBRequiredPage() {
                     <h3 className="text-xl font-semibold">Download Exam Config</h3>
                   </div>
                   <p className="text-gray-600 mb-4">
-                    Download your personalized exam configuration file that will automatically set up SEB for your exam.
+                    Download your personalized exam configuration file that will automatically 
+                    configure SEB with the correct security settings.
                   </p>
                   {courseId && (
                     <SEBConfigDownload
                       courseId={courseId}
-                      onConfigGenerated={() => {
-                        alert('✅ Configuration downloaded!\n\n📋 Next steps:\n1. Close this browser\n2. Double-click the .seb file\n3. Your exam will open in SEB automatically')
-                      }}
+                      onConfigGenerated={handleConfigDownloaded}
                     />
                   )}
                 </div>
               </div>
 
-              {/* Step-by-step instructions */}
+              {/* Detailed Instructions */}
               <div className="bg-white rounded-xl shadow-lg p-8">
-                <h3 className="text-2xl font-semibold mb-6">Complete Setup Instructions</h3>
-                <div className="space-y-6">
+                <h3 className="text-2xl font-semibold mb-6 flex items-center">
+                  <Settings className="w-6 h-6 mr-2" />
+                  Complete Setup Instructions
+                </h3>
+                <div className="space-y-8">
                   
+                  {/* Step 1 */}
                   <div className="flex items-start">
-                    <div className="flex-shrink-0 w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center mr-4 mt-1">
+                    <div className="flex-shrink-0 w-8 h-8 bg-[#001e62] rounded-full flex items-center justify-center mr-4 mt-1">
                       <span className="text-white text-sm font-bold">1</span>
                     </div>
                     <div>
-                      <h4 className="font-semibold text-lg mb-2">Install Safe Exam Browser</h4>
-                      <p className="text-gray-600">
+                      <h4 className="font-semibold text-lg mb-2 text-[#001e62]">Install Safe Exam Browser</h4>
+                      <p className="text-gray-600 mb-3">
                         Download SEB 3.6+ from the official website and install with administrator privileges. 
-                        Make sure to get the latest version for best security and compatibility.
+                        This ensures all security features work correctly.
                       </p>
+                      <div className="bg-blue-50 p-3 rounded-lg">
+                        <p className="text-blue-800 text-sm">
+                          <strong>Important:</strong> Only download from the official website to ensure security and authenticity.
+                        </p>
+                      </div>
                     </div>
                   </div>
 
+                  {/* Step 2 */}
                   <div className="flex items-start">
-                    <div className="flex-shrink-0 w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center mr-4 mt-1">
+                    <div className="flex-shrink-0 w-8 h-8 bg-[#001e62] rounded-full flex items-center justify-center mr-4 mt-1">
                       <span className="text-white text-sm font-bold">2</span>
                     </div>
                     <div>
-                      <h4 className="font-semibold text-lg mb-2">Download Exam Configuration</h4>
-                      <p className="text-gray-600">
-                        Click the "Download SEB Configuration" button above to get your personalized .seb file. 
-                        This file contains all the security settings for your exam.
+                      <h4 className="font-semibold text-lg mb-2 text-[#001e62]">Download Exam Configuration</h4>
+                      <p className="text-gray-600 mb-3">
+                        Click the "Download SEB Config" button above to get your personalized .seb file. 
+                        This file contains all the security settings for your specific exam.
                       </p>
+                      {configDownloaded && (
+                        <div className="bg-green-50 p-3 rounded-lg">
+                          <p className="text-green-800 text-sm flex items-center">
+                            <CheckCircle className="w-4 h-4 mr-1" />
+                            Configuration file downloaded successfully!
+                          </p>
+                        </div>
+                      )}
                     </div>
                   </div>
 
+                  {/* Step 3 */}
                   <div className="flex items-start">
                     <div className="flex-shrink-0 w-8 h-8 bg-orange-600 rounded-full flex items-center justify-center mr-4 mt-1">
                       <span className="text-white text-sm font-bold">3</span>
                     </div>
                     <div>
-                      <h4 className="font-semibold text-lg mb-2">Close All Applications</h4>
-                      <p className="text-gray-600 mb-2">
-                        <strong>IMPORTANT:</strong> Before starting your exam, close:
+                      <h4 className="font-semibold text-lg mb-2 text-orange-700">Close All Applications</h4>
+                      <p className="text-gray-600 mb-3">
+                        <strong>CRITICAL:</strong> Before starting your exam, you must close all applications:
                       </p>
-                      <ul className="text-gray-600 list-disc list-inside space-y-1">
-                        <li>All browser windows and tabs</li>
-                        <li>Messaging apps (WhatsApp, Telegram, Discord, etc.)</li>
-                        <li>Screen recording software (OBS, Bandicam, etc.)</li>
-                        <li>Remote access tools (TeamViewer, Chrome Remote Desktop)</li>
-                        <li>Any other unnecessary applications</li>
-                      </ul>
+                      <div className="grid md:grid-cols-2 gap-4">
+                        <ul className="text-gray-600 list-disc list-inside space-y-1 text-sm">
+                          <li>All browser windows and tabs</li>
+                          <li>Messaging apps (WhatsApp, Discord, Telegram)</li>
+                          <li>Screen recording software (OBS, Bandicam)</li>
+                          <li>Remote access tools (TeamViewer, AnyDesk)</li>
+                        </ul>
+                        <ul className="text-gray-600 list-disc list-inside space-y-1 text-sm">
+                          <li>Video conferencing apps (Zoom, Teams)</li>
+                          <li>Note-taking applications</li>
+                          <li>Media players and streaming apps</li>
+                          <li>Any other unnecessary programs</li>
+                        </ul>
+                      </div>
                     </div>
                   </div>
 
+                  {/* Step 4 */}
                   <div className="flex items-start">
                     <div className="flex-shrink-0 w-8 h-8 bg-green-600 rounded-full flex items-center justify-center mr-4 mt-1">
                       <span className="text-white text-sm font-bold">4</span>
                     </div>
                     <div>
-                      <h4 className="font-semibold text-lg mb-2">Start Your Exam</h4>
-                      <p className="text-gray-600">
+                      <h4 className="font-semibold text-lg mb-2 text-green-700">Start Your Secure Exam</h4>
+                      <p className="text-gray-600 mb-3">
                         Double-click the downloaded .seb file. SEB will launch automatically and load your exam 
-                        in a secure environment. Your exam will begin once SEB has loaded.
+                        in a secure environment. Your exam will begin once SEB has fully loaded.
                       </p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Emergency Info */}
-                <div className="mt-8 p-4 bg-amber-50 border border-amber-200 rounded-lg">
-                  <div className="flex items-start">
-                    <AlertCircle className="w-5 h-5 text-amber-600 mr-2 mt-0.5" />
-                    <div className="text-amber-800">
-                      <h4 className="font-semibold mb-1">Emergency Access</h4>
-                      <p className="text-sm">
-                        If you experience technical difficulties during the exam, press <strong>Ctrl+Alt+F1</strong> and 
-                        enter the admin password: <code className="bg-amber-100 px-1 rounded">admin123</code>. 
-                        Only use this for genuine technical issues.
-                      </p>
+                      <div className="bg-green-50 p-3 rounded-lg">
+                        <p className="text-green-800 text-sm">
+                          <strong>What happens next:</strong> SEB will take control of your screen, block shortcuts, 
+                          and create a secure exam environment. This is normal and expected behavior.
+                        </p>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -253,14 +480,26 @@ export default function SEBRequiredPage() {
 
               {/* Security Features */}
               <div className="bg-white rounded-xl shadow-lg p-8 mt-8">
-                <h3 className="text-2xl font-semibold mb-6">Security Features Active During Exam</h3>
-                <div className="grid md:grid-cols-2 gap-6">
+                <h3 className="text-2xl font-semibold mb-6 text-[#001e62]">Security Features During Exam</h3>
+                <div className="grid md:grid-cols-2 gap-8">
                   <div className="space-y-4">
-                    <h4 className="font-semibold text-lg">✅ What's Enabled:</h4>
+                    <h4 className="font-semibold text-lg text-green-700">✅ Security Measures Active:</h4>
                     <ul className="space-y-2 text-gray-600">
                       <li className="flex items-center">
                         <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
-                        Fullscreen lock mode
+                        Full-screen lock mode (cannot minimize or switch apps)
+                      </li>
+                      <li className="flex items-center">
+                        <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
+                        Keyboard shortcuts disabled (Alt+Tab, Ctrl+C, etc.)
+                      </li>
+                      <li className="flex items-center">
+                        <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
+                        Right-click context menu blocked
+                      </li>
+                      <li className="flex items-center">
+                        <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
+                        Screen recording prevention
                       </li>
                       <li className="flex items-center">
                         <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
@@ -268,34 +507,61 @@ export default function SEBRequiredPage() {
                       </li>
                       <li className="flex items-center">
                         <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
-                        Secure exam environment
-                      </li>
-                      <li className="flex items-center">
-                        <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
-                        Automatic session management
+                        Secure network filtering
                       </li>
                     </ul>
                   </div>
                   <div className="space-y-4">
-                    <h4 className="font-semibold text-lg">🚫 What's Blocked:</h4>
+                    <h4 className="font-semibold text-lg text-red-700">🚫 Blocked Applications:</h4>
                     <ul className="space-y-2 text-gray-600">
                       <li className="flex items-center">
-                        <AlertCircle className="w-4 h-4 text-red-500 mr-2" />
-                        Alt+Tab (app switching)
+                        <AlertTriangle className="w-4 h-4 text-red-500 mr-2" />
+                        Web browsers (Chrome, Firefox, Edge, Safari)
                       </li>
                       <li className="flex items-center">
-                        <AlertCircle className="w-4 h-4 text-red-500 mr-2" />
-                        Ctrl+C/V (copy/paste)
+                        <AlertTriangle className="w-4 h-4 text-red-500 mr-2" />
+                        Communication software (Discord, WhatsApp)
                       </li>
                       <li className="flex items-center">
-                        <AlertCircle className="w-4 h-4 text-red-500 mr-2" />
-                        F12, F11 (dev tools, fullscreen)
+                        <AlertTriangle className="w-4 h-4 text-red-500 mr-2" />
+                        Screen recording tools (OBS, Bandicam)
                       </li>
                       <li className="flex items-center">
-                        <AlertCircle className="w-4 h-4 text-red-500 mr-2" />
-                        Screen recording software
+                        <AlertTriangle className="w-4 h-4 text-red-500 mr-2" />
+                        Remote access software (TeamViewer)
+                      </li>
+                      <li className="flex items-center">
+                        <AlertTriangle className="w-4 h-4 text-red-500 mr-2" />
+                        Virtual machine detection and blocking
+                      </li>
+                      <li className="flex items-center">
+                        <AlertTriangle className="w-4 h-4 text-red-500 mr-2" />
+                        System utilities and task managers
                       </li>
                     </ul>
+                  </div>
+                </div>
+              </div>
+
+              {/* Emergency Access */}
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-6 mt-8">
+                <div className="flex items-start">
+                  <AlertTriangle className="w-6 h-6 text-amber-600 mr-3 mt-0.5" />
+                  <div className="text-amber-800">
+                    <h4 className="font-semibold mb-1">Emergency Access Information</h4>
+                    <p className="text-sm mb-3">
+                      If you encounter technical difficulties during the exam, you can exit SEB using the emergency method. 
+                      <strong>Only use this for genuine technical issues.</strong>
+                    </p>
+                    <div className="bg-amber-100 p-3 rounded">
+                      <p className="text-sm">
+                        <strong>Emergency Exit:</strong> Press <kbd className="bg-amber-200 px-1 rounded">Ctrl+Alt+F1</kbd> and 
+                        enter the admin password: <code className="bg-amber-200 px-1 rounded font-mono">admin123</code>
+                      </p>
+                      <p className="text-xs mt-2 text-amber-700">
+                        Note: Using emergency exit may flag your exam session and require manual review.
+                      </p>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -305,10 +571,11 @@ export default function SEBRequiredPage() {
           {/* Back button */}
           <div className="text-center mt-8">
             <button
-              onClick={() => router.push('/')}
+              onClick={() => router.push('/courses')}
               className="inline-flex items-center px-6 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-medium"
             >
-              Back to Home
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back to Courses
             </button>
           </div>
         </div>

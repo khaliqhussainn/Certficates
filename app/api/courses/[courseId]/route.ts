@@ -1,9 +1,9 @@
+// app/api/courses/[courseId]/route.ts - UPDATED (Remove completion requirement)
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { getServerSession } from "next-auth"
 import { NextRequest, NextResponse } from "next/server"
 
-// app/api/courses/[courseId]/route.ts - Get specific course details
 export async function GET(
   request: NextRequest,
   { params }: { params: { courseId: string } }
@@ -61,7 +61,7 @@ export async function GET(
       return NextResponse.json({ error: 'Course not found' }, { status: 404 })
     }
 
-    // Check if user has completed this course
+    // Check if user has completed this course (optional info)
     const completion = await prisma.courseCompletion.findUnique({
       where: {
         userId_courseId: {
@@ -105,8 +105,16 @@ export async function GET(
       certificate,
       payment,
       examAttempts,
-      canTakeExam: !!completion && !!payment && !certificate,
-      totalQuestions: course.examQuestions?.length || 50 // Default fallback
+      // UPDATED: Can take exam if paid (regardless of course completion)
+      canTakeExam: !!payment && !certificate,
+      totalQuestions: course.examQuestions?.length || 50,
+      // Additional info
+      courseCompletionOptional: true,
+      examAccessRequirements: {
+        payment: !!payment,
+        courseCompletion: false, // Not required
+        certificate: !certificate
+      }
     })
 
   } catch (error) {

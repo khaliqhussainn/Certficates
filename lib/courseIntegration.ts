@@ -1,4 +1,4 @@
-// Certificate Platform: lib/courseIntegration.ts
+// lib/courseIntegration.ts - UPDATED (Remove completion requirement)
 import { prisma } from './prisma'
 import crypto from 'crypto'
 
@@ -91,7 +91,7 @@ export class CourseIntegrationService {
         },
       })
 
-      // Sync course completions
+      // Sync course completions (optional data - not required for exams)
       for (const enrollment of courseUser.enrollments) {
         if (enrollment.completedAt && enrollment.progress >= 100) {
           // First, ensure the course exists in certificate platform
@@ -101,7 +101,7 @@ export class CourseIntegrationService {
             level: enrollment.courseLevel as any || 'BEGINNER'
           })
 
-          // Then create/update the completion record
+          // Create completion record (for informational purposes only)
           await prisma.courseCompletion.upsert({
             where: {
               userId_courseId: {
@@ -156,7 +156,7 @@ export class CourseIntegrationService {
         create: {
           id: courseId,
           title: metadata.title,
-          description: `Course synced from main website`,
+          description: `Professional certificate course - course completion not required for exam`,
           category: metadata.category,
           level: metadata.level as any,
           isPublished: true,
@@ -209,7 +209,7 @@ export class CourseIntegrationService {
             create: {
               id: courseData.id,
               title: courseData.title,
-              description: courseData.description,
+              description: courseData.description + ' - Course completion not required for certificate exam.',
               category: courseData.category,
               level: courseData.level,
               thumbnail: courseData.thumbnail,
@@ -231,7 +231,7 @@ export class CourseIntegrationService {
     }
   }
 
-  // Get user's completed courses
+  // Get user's completed courses (optional information)
   async getUserCompletedCourses(userId: string) {
     return await prisma.courseCompletion.findMany({
       where: { userId },
@@ -241,7 +241,7 @@ export class CourseIntegrationService {
     })
   }
 
-  // Check if user has completed a course
+  // Check if user has completed a course (optional - not required for exam access)
   async hasUserCompletedCourse(userId: string, courseId: string): Promise<boolean> {
     const completion = await prisma.courseCompletion.findUnique({
       where: {
@@ -252,6 +252,29 @@ export class CourseIntegrationService {
       },
     })
     return !!completion
+  }
+
+  // Check if user can take exam (only requires payment)
+  async canUserTakeExam(userId: string, courseId: string): Promise<boolean> {
+    // Check if user has paid for the exam
+    const payment = await prisma.payment.findFirst({
+      where: {
+        userId,
+        courseId,
+        status: 'COMPLETED'
+      }
+    })
+
+    // Check if user already has certificate
+    const certificate = await prisma.certificate.findFirst({
+      where: {
+        userId,
+        courseId,
+        isRevoked: false
+      }
+    })
+
+    return !!payment && !certificate
   }
 
   // Generate secure exam session

@@ -1,4 +1,4 @@
-// app/api/payments/create-exam-payment/route.ts
+// app/api/payments/create-exam-payment/route.ts - UPDATED (Remove completion check)
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
@@ -32,21 +32,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Course not found' }, { status: 404 })
     }
 
-    // Check if user has completed the course
-    const completion = await prisma.courseCompletion.findUnique({
-      where: {
-        userId_courseId: {
-          userId: session.user.id,
-          courseId: courseId
-        }
-      }
-    })
-
-    if (!completion) {
-      return NextResponse.json({ 
-        error: 'You must complete the course before booking the certificate exam' 
-      }, { status: 400 })
-    }
+    // REMOVED: Course completion requirement
+    // The course completion check has been removed - users can now book certificate exams
+    // without completing the course first
 
     // Check if user already paid for this course
     const existingPayment = await prisma.payment.findFirst({
@@ -83,11 +71,10 @@ export async function POST(request: NextRequest) {
         currency: 'USD',
         status: 'PENDING',
         stripePaymentIntentId: paymentIntent.id,
-        // Removed 'type' field as it doesn't exist in the schema
-        // You can store this info in the metadata field instead
         metadata: {
           type: 'CERTIFICATE_EXAM',
-          courseTitle: course.title
+          courseTitle: course.title,
+          note: 'Course completion not required for certificate exam'
         }
       }
     })

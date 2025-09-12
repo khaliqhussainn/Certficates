@@ -1,12 +1,28 @@
-// middleware.ts - FIXED VERSION FOR DEVELOPMENT
+// middleware.ts - Enhanced SEB Detection and Security
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-// SEB-protected routes that require browser exam key validation
+// Routes that require SEB validation in production
 const SEB_PROTECTED_ROUTES = [
   '/exam/',
   '/api/exam/session/',
-  '/api/exam/questions'
+  '/api/exam/questions/',
+  '/api/exam/submit-answer',
+  '/api/exam/complete'
+];
+
+// Routes that should always be accessible
+const ALWAYS_ACCESSIBLE_ROUTES = [
+  '/api/auth/',
+  '/api/courses/public',
+  '/api/ping',
+  '/api/certificate/verify',
+  '/seb-required',
+  '/courses/',
+  '/auth/',
+  '/_next/',
+  '/static/',
+  '/favicon.ico'
 ];
 
 // Check if route requires SEB validation
@@ -14,53 +30,101 @@ function requiresSEBValidation(pathname: string): boolean {
   return SEB_PROTECTED_ROUTES.some(route => pathname.startsWith(route));
 }
 
-// Validate SEB headers
-function validateSEBHeaders(request: NextRequest): { isValid: boolean; sebDetected: boolean } {
+// Check if route should always be accessible
+function isAlwaysAccessible(pathname: string): boolean {
+  return ALWAYS_ACCESSIBLE_ROUTES.some(route => pathname.startsWith(route)) ||
+         pathname.includes('.') || // Static files
+         pathname === '/';
+}
+
+// Advanced SEB validation
+function validateSEBHeaders(request: NextRequest): { 
+  isValid: boolean; 
+  sebDetected: boolean; 
+  securityLevel: 'none' | 'basic' | 'enhanced' | 'maximum';
+  details: string;
+} {
   const userAgent = request.headers.get('User-Agent') || '';
   const browserExamKey = request.headers.get('X-SafeExamBrowser-RequestHash');
   const configKey = request.headers.get('X-SafeExamBrowser-ConfigKeyHash');
+  const sebVersion = request.headers.get('X-SafeExamBrowser-Version');
   
-  // Check for SEB in User Agent
+  // Check for SEB patterns in User Agent
   const sebUserAgentPatterns = [
     /SEB[\s\/][\d\.]+/i,
     /SafeExamBrowser/i,
     /Safe.*Exam.*Browser/i
   ];
   
-  const sebDetected = sebUserAgentPatterns.some(pattern => pattern.test(userAgent)) ||
-                     !!(browserExamKey || configKey);
+  const sebInUserAgent = sebUserAgentPatterns.some(pattern => pattern.test(userAgent));
+  const sebDetected = sebInUserAgent || !!(browserExamKey || configKey || sebVersion);
   
-  // For development/testing, allow bypass
-  const isDevelopment = process.env.NODE_ENV === 'development';
-  const bypassHeader = request.headers.get('X-SEB-Bypass');
-  
-  if (isDevelopment) {
-    // Allow all exam access in development mode
-    return { isValid: true, sebDetected: sebDetected };
+  let securityLevel: 'none' | 'basic' | 'enhanced' | 'maximum' = 'none';
+  let isValid = false;
+  let details = 'No SEB detected';
+
+  if (sebDetected) {
+    if (browserExamKey && configKey) {
+      // Maximum security - modern SEB with both keys
+      securityLevel = 'maximum';
+      isValid = true;
+      details = 'Modern SEB with full key validation';
+    } else if (browserExamKey || configKey) {
+      // Enhanced security - partial key validation
+      securityLevel = 'enhanced';
+      isValid = true;
+      details = 'SEB with partial key validation';
+    } else if (sebVersion) {
+      // Basic security - version header present
+      securityLevel = 'basic';
+      isValid = true;
+      details = `SEB version ${sebVersion} detected`;
+    } else if (sebInUserAgent) {
+      // Basic security - user agent detection only
+      securityLevel = 'basic';
+      isValid = true;
+      details = 'SEB detected via User Agent';
+    }
   }
-  
-  // Production validation
-  const isValid = !!(browserExamKey && configKey) || // Modern SEB with both keys
-                  !!(browserExamKey || configKey) ||   // Legacy SEB with one key
-                  sebDetected;                         // Basic SEB detection
-  
-  return { isValid, sebDetected };
+
+  // Development mode bypass
+  const isDevelopment = process.env.NODE_ENV === 'development';
+  if (isDevelopment) {
+    return { 
+      isValid: true, 
+      sebDetected, 
+      securityLevel: sebDetected ? securityLevel : 'none',
+      details: `DEV MODE: ${details}`
+    };
+  }
+
+  return { isValid, sebDetected, securityLevel, details };
 }
 
-// Generate SEB error response
-function createSEBErrorResponse(request: NextRequest) {
+// Create SEB error response
+function createSEBErrorResponse(request: NextRequest, validation: any) {
   const isApiRoute = request.nextUrl.pathname.startsWith('/api/');
   
   if (isApiRoute) {
     return NextResponse.json(
       {
         error: 'SEB_REQUIRED',
-        message: 'Safe Exam Browser is required to access this resource',
+        message: 'Safe Exam Browser is required to access this secure exam resource',
         sebRequired: true,
-        detectedSEB: false,
-        environment: process.env.NODE_ENV
+        detectedSEB: validation.sebDetected,
+        securityLevel: validation.securityLevel,
+        details: validation.details,
+        environment: process.env.NODE_ENV,
+        setupUrl: `/seb-required?returnUrl=${encodeURIComponent(request.nextUrl.pathname)}`
       },
-      { status: 403 }
+      { 
+        status: 403,
+        headers: {
+          'X-SEB-Required': 'true',
+          'X-Security-Level': validation.securityLevel,
+          'X-SEB-Detected': validation.sebDetected.toString()
+        }
+      }
     );
   }
   
@@ -68,97 +132,124 @@ function createSEBErrorResponse(request: NextRequest) {
   const sebSetupUrl = new URL('/seb-required', request.url);
   sebSetupUrl.searchParams.set('returnUrl', request.nextUrl.pathname + request.nextUrl.search);
   
-  return NextResponse.redirect(sebSetupUrl);
+  const response = NextResponse.redirect(sebSetupUrl);
+  response.headers.set('X-SEB-Required', 'true');
+  response.headers.set('X-Security-Level', validation.securityLevel);
+  
+  return response;
+}
+
+// Log security events
+function logSecurityEvent(request: NextRequest, validation: any, action: string) {
+  if (process.env.NODE_ENV === 'production') {
+    console.log(`🔐 SECURITY: ${action}`, {
+      path: request.nextUrl.pathname,
+      sebDetected: validation.sebDetected,
+      securityLevel: validation.securityLevel,
+      userAgent: request.headers.get('User-Agent')?.substring(0, 100),
+      ip: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip'),
+      timestamp: new Date().toISOString()
+    });
+  }
 }
 
 export function middleware(request: NextRequest) {
   const { pathname, searchParams } = request.nextUrl;
   
-  // Skip middleware for static files and non-protected routes
-  if (
-    pathname.startsWith('/_next/') ||
-    pathname.startsWith('/api/auth/') ||
-    pathname.startsWith('/static/') ||
-    pathname.startsWith('/favicon.ico') ||
-    pathname.includes('.') ||
-    pathname === '/api/ping' ||
-    pathname.startsWith('/api/courses/public') ||
-    pathname.startsWith('/api/certificate/verify')
-  ) {
+  // Skip middleware for always accessible routes
+  if (isAlwaysAccessible(pathname)) {
     return NextResponse.next();
   }
 
-  // In development mode, log access but don't block
-  if (process.env.NODE_ENV === 'development') {
-    const needsSEB = requiresSEBValidation(pathname);
-    const isSEBMode = searchParams.get('seb') === 'true';
-    
-    if (needsSEB || isSEBMode) {
-      console.log(`🔍 DEV MODE: Allowing access to ${pathname} (would require SEB in production)`);
-      
-      const response = NextResponse.next();
-      response.headers.set('X-SEB-Dev-Mode', 'true');
-      response.headers.set('X-SEB-Warning', 'Development mode - SEB validation bypassed');
-      return response;
-    }
-    
-    return NextResponse.next();
-  }
-  
-  // Production mode - enforce SEB validation
+  // Check if this route requires SEB or has SEB parameter
   const needsSEB = requiresSEBValidation(pathname);
-  const isSEBMode = searchParams.get('seb') === 'true';
+  const hasSEBParam = searchParams.get('seb') === 'true';
   
-  // Only enforce SEB for routes that explicitly require it or have seb=true parameter
-  if (!needsSEB && !isSEBMode) {
+  // If route doesn't require SEB and doesn't have SEB param, allow access
+  if (!needsSEB && !hasSEBParam) {
     return NextResponse.next();
   }
+
+  // Validate SEB for protected routes
+  const validation = validateSEBHeaders(request);
   
-  // Validate SEB headers
-  const { isValid, sebDetected } = validateSEBHeaders(request);
-  
-  // Allow access if SEB is properly validated
-  if (isValid && sebDetected) {
+  // Development mode - log but allow access
+  if (process.env.NODE_ENV === 'development') {
     const response = NextResponse.next();
+    response.headers.set('X-SEB-Dev-Mode', 'true');
+    response.headers.set('X-SEB-Detected', validation.sebDetected.toString());
+    response.headers.set('X-Security-Level', validation.securityLevel);
+    response.headers.set('X-SEB-Details', validation.details);
     
-    // Add security headers for SEB-protected routes
-    response.headers.set('X-Frame-Options', 'DENY');
-    response.headers.set('X-Content-Type-Options', 'nosniff');
-    response.headers.set('Referrer-Policy', 'no-referrer');
-    response.headers.set('X-SEB-Validated', 'true');
-    
-    // Add CSP for extra security
-    const csp = [
-      "default-src 'self'",
-      "script-src 'self' 'unsafe-inline'",
-      "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: https:",
-      "connect-src 'self'",
-      "font-src 'self'",
-      "object-src 'none'",
-      "media-src 'self'",
-      "frame-src 'none'"
-    ].join('; ');
-    
-    response.headers.set('Content-Security-Policy', csp);
+    if (needsSEB || hasSEBParam) {
+      console.log(`🔍 DEV MODE: Allowing access to ${pathname}`, validation);
+    }
     
     return response;
   }
   
-  // Block access if SEB is required but not detected (production only)
-  console.log(`🚫 PRODUCTION: SEB required but not detected for ${pathname}`);
-  return createSEBErrorResponse(request);
+  // Production mode - enforce SEB validation
+  if (!validation.isValid || !validation.sebDetected) {
+    logSecurityEvent(request, validation, 'ACCESS_DENIED');
+    return createSEBErrorResponse(request, validation);
+  }
+  
+  // SEB validated - allow access with security headers
+  logSecurityEvent(request, validation, 'ACCESS_GRANTED');
+  
+  const response = NextResponse.next();
+  
+  // Add comprehensive security headers for SEB-protected routes
+  const securityHeaders: Record<string, string> = {
+    'X-Frame-Options': 'DENY',
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'no-referrer',
+    'X-SEB-Validated': 'true',
+    'X-Security-Level': validation.securityLevel,
+    'X-SEB-Details': validation.details,
+    'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+    'X-XSS-Protection': '1; mode=block'
+  };
+
+  // Enhanced CSP for maximum security
+  const csp = [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline'", // Needed for React/Next.js
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: https:",
+    "connect-src 'self'",
+    "font-src 'self'",
+    "object-src 'none'",
+    "media-src 'self'",
+    "frame-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'"
+  ].join('; ');
+
+  securityHeaders['Content-Security-Policy'] = csp;
+
+  // Apply all security headers
+  Object.entries(securityHeaders).forEach(([key, value]) => {
+    response.headers.set(key, value);
+  });
+
+  // Add security monitoring headers
+  response.headers.set('X-Exam-Session-Start', Date.now().toString());
+  response.headers.set('X-Security-Monitoring', 'active');
+  
+  return response;
 }
 
 export const config = {
   matcher: [
     /*
-     * Match all request paths except for the ones starting with:
+     * Match all request paths except for:
      * - api/auth (authentication routes)
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
+     * - Static assets
      */
-    '/((?!api/auth|_next/static|_next/image|favicon.ico).*)',
+    '/((?!api/auth|_next/static|_next/image|favicon.ico|.*\\.).*)',
   ],
 };

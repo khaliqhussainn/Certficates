@@ -1,8 +1,8 @@
-// app/exam/[courseId]/page.tsx - COMPLETELY FIXED VERSION
+// app/exam/[courseId]/page.tsx - Professional Secure Exam Environment
 "use client";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useSession } from "next-auth/react";
-import { useRouter, useParams } from "next/navigation";
+import { useRouter, useParams, useSearchParams } from "next/navigation";
 import {
   Shield,
   Clock,
@@ -22,6 +22,10 @@ import {
   FileText,
   Activity,
   Play,
+  Loader2,
+  XCircle,
+  RefreshCw,
+  Target
 } from "lucide-react";
 
 // --- Types ---
@@ -57,48 +61,132 @@ interface SystemCheck {
   seb: boolean;
 }
 
+interface SEBInfo {
+  isSEB: boolean;
+  version?: string;
+  configKey?: string;
+  browserExamKey?: string;
+  platform?: string;
+  securityMode: 'none' | 'legacy' | 'modern';
+  detectionMethod: string;
+  isVerified: boolean;
+}
+
 // --- SEB Detection Hook ---
-function useSafeExamBrowser() {
-  const [isSEB, setIsSEB] = useState(false);
-  const [sebVersion, setSebVersion] = useState<string>("");
+function useSafeExamBrowser(): SEBInfo {
+  const [sebInfo, setSebInfo] = useState<SEBInfo>({
+    isSEB: false,
+    securityMode: 'none',
+    detectionMethod: 'none',
+    isVerified: false
+  });
 
-  useEffect(() => {
-    const detectSEB = () => {
-      const userAgent = navigator.userAgent;
-      const sebPatterns = [/SEB[\s\/][\d\.]+/i, /SafeExamBrowser/i, /SEB\//i];
-      const isSEBByUserAgent = sebPatterns.some((pattern) =>
-        pattern.test(userAgent)
-      );
-      const isSEBByWindow =
-        (window as any).SafeExamBrowser !== undefined ||
-        (window as any).seb !== undefined;
-
-      const detected = isSEBByUserAgent || isSEBByWindow;
-      setIsSEB(detected);
-
-      if ((window as any).SafeExamBrowser?.version) {
-        setSebVersion((window as any).SafeExamBrowser.version);
-      } else if (detected) {
-        const versionMatch = userAgent.match(/SEB[\s\/]([\d\.]+)/i);
-        setSebVersion(versionMatch ? versionMatch[1] : "Detected");
-      }
+  const detectSEB = useCallback(() => {
+    const win = window as any;
+    let detectionInfo: SEBInfo = {
+      isSEB: false,
+      securityMode: 'none',
+      detectionMethod: 'none',
+      isVerified: false
     };
 
-    detectSEB();
-    const timer = setInterval(detectSEB, 5000);
-    return () => clearInterval(timer);
+    try {
+      // Method 1: Modern SEB JavaScript API
+      if (win.SafeExamBrowser_) {
+        detectionInfo = {
+          isSEB: true,
+          version: 'Modern API',
+          configKey: win.SafeExamBrowser_.getConfigKey?.(),
+          browserExamKey: win.SafeExamBrowser_.getBrowserExamKey?.(),
+          platform: 'Modern SEB',
+          securityMode: 'modern',
+          detectionMethod: 'JavaScript API',
+          isVerified: true
+        };
+      }
+      // Method 2: Legacy SafeExamBrowser object
+      else if (win.SafeExamBrowser) {
+        detectionInfo = {
+          isSEB: true,
+          version: win.SafeExamBrowser.version,
+          configKey: win.SafeExamBrowser.configKey,
+          browserExamKey: win.SafeExamBrowser.browserExamKey,
+          platform: win.SafeExamBrowser.platform,
+          securityMode: 'legacy',
+          detectionMethod: 'Legacy SafeExamBrowser object',
+          isVerified: true
+        };
+      }
+      // Method 3: User Agent Detection (fallback)
+      else {
+        const userAgent = navigator.userAgent;
+        const sebPatterns = [
+          /SEB[\s\/][\d\.]+/i,
+          /SafeExamBrowser/i,
+          /SEB\//i,
+          /Safe Exam Browser/i
+        ];
+        
+        const isSEBByUserAgent = sebPatterns.some(pattern => pattern.test(userAgent));
+        
+        if (isSEBByUserAgent) {
+          const versionMatch = userAgent.match(/SEB[\s\/]([\d\.]+)/i);
+          detectionInfo = {
+            isSEB: true,
+            version: versionMatch ? versionMatch[1] : 'Unknown',
+            securityMode: 'legacy',
+            detectionMethod: 'User Agent',
+            isVerified: false
+          };
+        }
+      }
+
+      // Additional verification for certificate exams
+      if (detectionInfo.isSEB) {
+        detectionInfo.isVerified = detectionInfo.securityMode === 'modern' || 
+                                   (!!detectionInfo.browserExamKey && !!detectionInfo.configKey);
+      }
+
+    } catch (error) {
+      console.error('SEB detection error:', error);
+    }
+
+    setSebInfo(detectionInfo);
+    return detectionInfo;
   }, []);
 
-  return { isSEB, sebVersion };
+  useEffect(() => {
+    // Initial detection
+    detectSEB();
+    
+    // Periodic re-detection
+    const interval = setInterval(detectSEB, 3000);
+    
+    // Listen for custom SEB events
+    const handleSEBReady = () => {
+      setTimeout(detectSEB, 100);
+    };
+
+    window.addEventListener('SEBReady', handleSEBReady);
+    
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('SEBReady', handleSEBReady);
+    };
+  }, [detectSEB]);
+
+  return sebInfo;
 }
 
 // --- SEB Config Download Component ---
-function SEBConfigDownload({ courseId }: { courseId: string }) {
+function SEBConfigDownload({ courseId, sessionId }: { courseId: string; sessionId?: string }) {
   const [isDownloading, setIsDownloading] = useState(false);
 
   const generateSEBConfig = () => {
     const baseURL = process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
-    const examURL = `${baseURL}/exam/${courseId}?seb=true`;
+    const sessionParam = sessionId ? `?session=${sessionId}` : '';
+    const sebParam = sessionParam ? '&seb=true' : '?seb=true';
+    const examURL = `${baseURL}/exam/${courseId}${sessionParam}${sebParam}`;
     const quitURL = `${baseURL}/courses/${courseId}`;
 
     return {
@@ -108,7 +196,8 @@ function SEBConfigDownload({ courseId }: { courseId: string }) {
       allowQuit: true,
       quitExamPasswordHash: btoa("admin123"),
       quitExamText: "Enter administrator password to quit exam:",
-      // Disable dangerous shortcuts
+      
+      // Security lockdown
       ignoreExitKeys: true,
       enableF3: false,
       enableF1: false,
@@ -121,6 +210,7 @@ function SEBConfigDownload({ courseId }: { courseId: string }) {
       enablePrintScreen: false,
       enableEsc: false,
       enableCtrlAltDel: false,
+      
       // Browser restrictions
       allowBrowsingBackForward: false,
       allowReload: false,
@@ -131,18 +221,21 @@ function SEBConfigDownload({ courseId }: { courseId: string }) {
       newBrowserWindowByLinkPolicy: 0,
       newBrowserWindowByScriptPolicy: 0,
       blockPopUpWindows: true,
+      
       // Content restrictions
       allowCopy: false,
       allowCut: false,
       allowPaste: false,
       allowSpellCheck: false,
       allowDictation: false,
+      
       // Security settings
       enableLogging: true,
       logLevel: 2,
       detectVirtualMachine: true,
       allowVirtualMachine: false,
       forceAppFolderInstall: true,
+      
       // URL filtering
       URLFilterEnable: true,
       URLFilterEnableContentFilter: true,
@@ -152,9 +245,18 @@ function SEBConfigDownload({ courseId }: { courseId: string }) {
           active: true,
           expression: examURL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
         },
-        { action: 1, active: true, expression: `${baseURL}/api/*` },
+        { action: 1, active: true, expression: `${baseURL}/api/exam/*` },
         { action: 0, active: true, expression: "*" },
       ],
+      
+      // Process blocking
+      prohibitedProcesses: [
+        { active: true, currentUser: true, description: "Block OBS", executable: "obs", windowHandling: 1 },
+        { active: true, currentUser: true, description: "Block TeamViewer", executable: "TeamViewer", windowHandling: 1 },
+        { active: true, currentUser: true, description: "Block Discord", executable: "Discord", windowHandling: 1 },
+        { active: true, currentUser: true, description: "Block Chrome", executable: "chrome", windowHandling: 1 },
+        { active: true, currentUser: true, description: "Block Firefox", executable: "firefox", windowHandling: 1 }
+      ]
     };
   };
 
@@ -163,7 +265,7 @@ function SEBConfigDownload({ courseId }: { courseId: string }) {
     try {
       const sebConfig = generateSEBConfig();
       const blob = new Blob([JSON.stringify(sebConfig, null, 2)], {
-        type: "application/json",
+        type: "application/seb",
       });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -176,7 +278,7 @@ function SEBConfigDownload({ courseId }: { courseId: string }) {
 
       setTimeout(() => {
         alert(
-          `Configuration downloaded successfully!\n\nNext steps:\n1. Install Safe Exam Browser\n2. Close all applications\n3. Double-click the .seb file\n4. Your exam will load automatically\n\nAdmin password: admin123`
+          `✅ SEB Configuration Downloaded!\n\n📋 SETUP STEPS:\n\n1️⃣ INSTALL SEB:\n• Download from safeexambrowser.org\n• Install with admin privileges\n\n2️⃣ CLOSE ALL APPS:\n• Close all browsers & applications\n• Exit messaging apps (WhatsApp, etc.)\n• Stop screen recording software\n\n3️⃣ START EXAM:\n• Double-click the .seb file\n• Your exam will load automatically\n\n🔐 EMERGENCY PASSWORD: admin123\n(Only use for technical issues)`
         );
       }, 500);
     } catch (error) {
@@ -193,10 +295,10 @@ function SEBConfigDownload({ courseId }: { courseId: string }) {
         <button
           onClick={downloadSEBConfig}
           disabled={isDownloading}
-          className="inline-flex items-center px-4 py-2 bg-[#001e62] text-white rounded-lg hover:bg-[#001e62]/90 transition-colors text-sm font-medium disabled:opacity-50"
+          className="inline-flex items-center px-6 py-3 bg-[#001e62] text-white rounded-lg hover:bg-[#001e62]/90 transition-colors font-medium disabled:opacity-50"
         >
           {isDownloading ? (
-            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
+            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
           ) : (
             <Download className="w-4 h-4 mr-2" />
           )}
@@ -206,7 +308,7 @@ function SEBConfigDownload({ courseId }: { courseId: string }) {
           href="https://safeexambrowser.org/download_en.html"
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-sm font-medium"
+          className="inline-flex items-center px-6 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors font-medium"
         >
           <Monitor className="w-4 h-4 mr-2" />
           Download SEB Browser
@@ -221,8 +323,9 @@ export default function SecureExamPage() {
   const { data: session } = useSession();
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
   const courseId = params.courseId as string;
-  const { isSEB, sebVersion } = useSafeExamBrowser();
+  const { isSEB, version: sebVersion, securityMode, detectionMethod, isVerified } = useSafeExamBrowser();
 
   // --- State ---
   const [examSession, setExamSession] = useState<ExamSession | null>(null);
@@ -245,12 +348,123 @@ export default function SecureExamPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [violations, setViolations] = useState<any[]>([]);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [securityValidated, setSecurityValidated] = useState(false);
 
   // --- Refs ---
   const timerRef = useRef<NodeJS.Timeout>();
   const videoRef = useRef<HTMLVideoElement>(null);
+  const monitoringRef = useRef<NodeJS.Timeout>();
 
-  // --- Functions ---
+  // --- Security Monitoring ---
+  const startSecurityMonitoring = useCallback(() => {
+    // Monitor fullscreen changes
+    const handleFullscreenChange = () => {
+      const isCurrentlyFullscreen = !!document.fullscreenElement;
+      setIsFullscreen(isCurrentlyFullscreen);
+      
+      if (!isCurrentlyFullscreen && !isSEB && examStarted) {
+        recordViolation({
+          type: 'FULLSCREEN_EXIT',
+          details: 'User exited fullscreen mode',
+          timestamp: new Date().toISOString()
+        });
+      }
+    };
+
+    // Monitor tab visibility
+    const handleVisibilityChange = () => {
+      if (document.hidden && examStarted) {
+        recordViolation({
+          type: 'TAB_SWITCH',
+          details: 'User switched tabs or minimized window',
+          timestamp: new Date().toISOString()
+        });
+      }
+    };
+
+    // Monitor window focus
+    const handleWindowBlur = () => {
+      if (examStarted) {
+        recordViolation({
+          type: 'WINDOW_BLUR',
+          details: 'Browser window lost focus',
+          timestamp: new Date().toISOString()
+        });
+      }
+    };
+
+    // Block copy/paste
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (examStarted) {
+        // Block common shortcuts
+        if ((e.ctrlKey || e.metaKey) && ['c', 'v', 'x', 'a', 's', 'p', 'f'].includes(e.key.toLowerCase())) {
+          e.preventDefault();
+          recordViolation({
+            type: 'KEYBOARD_SHORTCUT',
+            details: `Attempted keyboard shortcut: ${e.key}`,
+            timestamp: new Date().toISOString()
+          });
+        }
+        
+        // Block F-keys
+        if (e.key.startsWith('F') && e.key.length <= 3) {
+          e.preventDefault();
+          recordViolation({
+            type: 'FUNCTION_KEY',
+            details: `Attempted function key: ${e.key}`,
+            timestamp: new Date().toISOString()
+          });
+        }
+      }
+    };
+
+    // Block right-click
+    const handleContextMenu = (e: MouseEvent) => {
+      if (examStarted) {
+        e.preventDefault();
+        recordViolation({
+          type: 'RIGHT_CLICK',
+          details: 'Attempted right-click context menu',
+          timestamp: new Date().toISOString()
+        });
+      }
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('blur', handleWindowBlur);
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('contextmenu', handleContextMenu);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('blur', handleWindowBlur);
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('contextmenu', handleContextMenu);
+    };
+  }, [isSEB, examStarted]);
+
+  const recordViolation = async (violation: any) => {
+    try {
+      setViolations(prev => [...prev, violation]);
+      
+      if (examSession?.id) {
+        await fetch('/api/exam/violation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: examSession.id,
+            violation
+          })
+        });
+      }
+    } catch (error) {
+      console.error('Error recording violation:', error);
+    }
+  };
+
+  // --- System Checks ---
   const performSystemChecks = async () => {
     const checks: Partial<SystemCheck> = {
       seb: isSEB,
@@ -280,12 +494,13 @@ export default function SecureExamPage() {
     setSystemChecks((prev) => ({ ...prev, ...checks }));
   };
 
+  // --- Initialize Exam ---
   const initializeExam = async () => {
     try {
       setLoading(true);
-      console.log("Initializing exam for course:", courseId);
+      console.log("Initializing secure exam for course:", courseId);
 
-      // Step 1: Get or create exam session
+      // Create or get exam session
       const sessionResponse = await fetch(
         `/api/exam/session?courseId=${courseId}`,
         {
@@ -296,15 +511,15 @@ export default function SecureExamPage() {
 
       if (!sessionResponse.ok) {
         const errorData = await sessionResponse.json();
-        throw new Error(errorData.error || "Failed to get exam session");
+        throw new Error(errorData.error || "Failed to create exam session");
       }
 
       const sessionData: ExamSession = await sessionResponse.json();
-      console.log("Exam session created/retrieved:", sessionData);
+      console.log("Secure exam session created:", sessionData);
       setExamSession(sessionData);
       setTimeRemaining(sessionData.duration * 60);
 
-      // Step 2: Get exam questions
+      // Get exam questions
       const questionsResponse = await fetch(
         `/api/exam/questions/${courseId}?sessionId=${sessionData.id}`
       );
@@ -318,8 +533,14 @@ export default function SecureExamPage() {
       console.log("Questions loaded:", questionsData.questions?.length || 0);
       setQuestions(questionsData.questions || []);
 
-      // Step 3: Perform system checks
+      // Perform system checks
       await performSystemChecks();
+      
+      // Validate SEB if detected
+      if (isSEB && isVerified) {
+        await validateSEBEnvironment(sessionData.id);
+      }
+      
     } catch (error) {
       console.error("Exam initialization error:", error);
       setError(
@@ -330,21 +551,58 @@ export default function SecureExamPage() {
     }
   };
 
+  // --- SEB Validation ---
+  const validateSEBEnvironment = async (sessionId: string) => {
+    try {
+      const response = await fetch('/api/exam/seb-validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: sessionId,
+          browserExamKey: (window as any).SafeExamBrowser?.browserExamKey,
+          configKey: (window as any).SafeExamBrowser?.configKey,
+          userAgent: navigator.userAgent,
+          sebInfo: {
+            version: sebVersion,
+            platform: navigator.platform,
+            securityMode: securityMode,
+            detectionMethod: detectionMethod,
+            isVerified: isVerified
+          }
+        })
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        setSecurityValidated(result.isValid);
+        console.log('SEB validation result:', result);
+      }
+    } catch (error) {
+      console.error('SEB validation error:', error);
+    }
+  };
+
+  // --- Start Exam ---
   const startExam = async () => {
     if (!examSession || !questions.length) {
-      alert("Exam session or questions not ready. Please refresh the page.");
+      alert("Exam session not ready. Please refresh the page.");
+      return;
+    }
+
+    // Security validation for production
+    if (process.env.NODE_ENV === 'production' && !isSEB) {
+      alert("Safe Exam Browser is required for this exam. Please download and configure SEB first.");
       return;
     }
 
     try {
-      console.log("Starting exam session:", examSession.id);
+      console.log("Starting secure exam:", examSession.id);
 
-      // Start the exam session on the server
-      const response = await fetch(`/api/exam/start`, {
+      // Start the exam session
+      const response = await fetch(`/api/exam/session/${examSession.id}/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          sessionId: examSession.id,
           browserData: {
             userAgent: navigator.userAgent,
             screen: { width: screen.width, height: screen.height },
@@ -353,13 +611,12 @@ export default function SecureExamPage() {
         }),
       });
 
-      const result = await response.json();
-
       if (!response.ok) {
+        const result = await response.json();
         throw new Error(result.error || "Failed to start exam");
       }
 
-      console.log("Exam started successfully:", result);
+      console.log("Secure exam started successfully");
 
       // Enter fullscreen if not using SEB
       if (!isSEB && document.documentElement.requestFullscreen) {
@@ -383,7 +640,10 @@ export default function SecureExamPage() {
         }
       }
 
-      // Start the timer
+      // Start security monitoring
+      startSecurityMonitoring();
+
+      // Start the exam timer
       timerRef.current = setInterval(() => {
         setTimeRemaining((prev) => {
           if (prev <= 1) {
@@ -394,6 +654,11 @@ export default function SecureExamPage() {
           return prev - 1;
         });
       }, 1000);
+
+      // Start periodic monitoring
+      monitoringRef.current = setInterval(() => {
+        performSecurityCheck();
+      }, 30000); // Check every 30 seconds
 
       setExamStarted(true);
       setShowSystemCheck(false);
@@ -407,6 +672,29 @@ export default function SecureExamPage() {
     }
   };
 
+  // --- Periodic Security Check ---
+  const performSecurityCheck = async () => {
+    if (!examSession?.id) return;
+
+    try {
+      await fetch('/api/exam/heartbeat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: examSession.id,
+          browserData: {
+            userAgent: navigator.userAgent,
+            screen: { width: screen.width, height: screen.height },
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          }
+        })
+      });
+    } catch (error) {
+      console.error('Security check failed:', error);
+    }
+  };
+
+  // --- Submit Exam ---
   const handleSubmitExam = async (reason: string = "USER_SUBMIT") => {
     if (isSubmitting) return;
 
@@ -438,6 +726,11 @@ export default function SecureExamPage() {
           await document.exitFullscreen().catch(() => {});
         }
 
+        // Clear monitoring
+        if (monitoringRef.current) {
+          clearInterval(monitoringRef.current);
+        }
+
         router.push(`/exam/results/${examSession?.id}`);
       } else {
         const errorData = await response.json();
@@ -451,10 +744,32 @@ export default function SecureExamPage() {
     }
   };
 
+  // --- Answer Handling ---
   const handleAnswerChange = (questionId: string, selectedOption: number) => {
     setAnswers((prev) => ({ ...prev, [questionId]: selectedOption }));
+    
+    // Auto-save answer
+    saveAnswer(questionId, selectedOption);
   };
 
+  const saveAnswer = async (questionId: string, selectedAnswer: number) => {
+    try {
+      await fetch("/api/exam/submit-answer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: examSession?.id,
+          questionId,
+          selectedAnswer,
+          timeSpent: 30
+        }),
+      });
+    } catch (error) {
+      console.error("Error saving answer:", error);
+    }
+  };
+
+  // --- Navigation ---
   const handleNextQuestion = () => {
     if (currentQuestion < questions.length - 1) {
       setCurrentQuestion((prev) => prev + 1);
@@ -467,12 +782,21 @@ export default function SecureExamPage() {
     }
   };
 
+  // --- Utility Functions ---
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins.toString().padStart(2, "0")}:${secs
       .toString()
       .padStart(2, "0")}`;
+  };
+
+  const getSystemCheckIcon = (status: boolean) => {
+    return status ? (
+      <CheckCircle2 className="w-5 h-5 text-green-500" />
+    ) : (
+      <XCircle className="w-5 h-5 text-red-500" />
+    );
   };
 
   // --- Effects ---
@@ -492,18 +816,26 @@ export default function SecureExamPage() {
       if (timerRef.current) {
         clearInterval(timerRef.current);
       }
+      if (monitoringRef.current) {
+        clearInterval(monitoringRef.current);
+      }
     };
   }, []);
+
+  // Update system checks when SEB status changes
+  useEffect(() => {
+    setSystemChecks(prev => ({ ...prev, seb: isSEB }));
+  }, [isSEB]);
 
   // --- Loading State ---
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-2 border-[#001e62] border-t-transparent mx-auto mb-4"></div>
-          <p className="text-lg font-medium text-gray-900">Loading Exam...</p>
+          <Loader2 className="h-12 w-12 animate-spin text-[#001e62] mx-auto mb-4" />
+          <p className="text-lg font-medium text-gray-900">Initializing Secure Exam...</p>
           <p className="text-sm text-gray-500 mt-2">
-            Preparing your secure exam environment
+            Preparing your secure examination environment
           </p>
         </div>
       </div>
@@ -540,7 +872,7 @@ export default function SecureExamPage() {
     );
   }
 
-  // --- System Check Screen ---
+  // --- Pre-Exam Security Check Screen ---
   if (showSystemCheck) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-[#001e62] to-[#003a8c] flex items-center justify-center p-4">
@@ -550,16 +882,19 @@ export default function SecureExamPage() {
             <div className="bg-[#001e62] text-white p-8 text-center">
               <Shield className="w-16 h-16 mx-auto mb-4" />
               <h1 className="text-3xl font-bold mb-2">
-                Secure Exam Environment
+                Secure Examination Environment
               </h1>
-              <p className="text-blue-100">System Security Verification</p>
+              <p className="text-blue-100">Professional Certificate Exam</p>
               {isSEB && (
                 <div className="mt-4 bg-green-600 rounded-lg p-3">
                   <div className="flex items-center justify-center">
                     <CheckCircle2 className="w-5 h-5 mr-2" />
                     <span className="font-medium">
-                      Safe Exam Browser Detected - Version {sebVersion}
+                      Safe Exam Browser Detected - {sebVersion || 'Active'}
                     </span>
+                  </div>
+                  <div className="text-sm text-green-100 mt-1">
+                    Security Mode: {securityMode} | Method: {detectionMethod}
                   </div>
                 </div>
               )}
@@ -567,33 +902,28 @@ export default function SecureExamPage() {
 
             <div className="p-8">
               {/* SEB Status */}
-              {isSEB ? (
-                <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
+              {!isSEB && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-6 mb-6">
                   <div className="flex items-start">
-                    <CheckCircle2 className="w-5 h-5 text-green-600 mr-3 mt-0.5" />
+                    <AlertTriangle className="w-6 h-6 text-amber-600 mr-3 mt-0.5" />
                     <div className="flex-1">
-                      <h3 className="font-medium text-green-800">
-                        Safe Exam Browser Active
+                      <h3 className="font-medium text-amber-800 mb-2">
+                        Safe Exam Browser Required
                       </h3>
-                      <p className="text-sm text-green-700 mt-1">
-                        Secure environment is properly configured and running
+                      <p className="text-sm text-amber-700 mb-4">
+                        This is a secure certificate exam that requires Safe Exam Browser (SEB) 
+                        to ensure exam integrity and prevent unauthorized assistance.
                       </p>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
-                  <div className="flex items-start">
-                    <AlertTriangle className="w-5 h-5 text-amber-600 mr-3 mt-0.5" />
-                    <div className="flex-1">
-                      <h3 className="font-medium text-amber-800">
-                        Safe Exam Browser Recommended
-                      </h3>
-                      <p className="text-sm text-amber-700 mb-3">
-                        For maximum security, use Safe Exam Browser with the
-                        configuration below.
-                      </p>
-                      <SEBConfigDownload courseId={courseId} />
+                      
+                      {process.env.NODE_ENV === 'development' ? (
+                        <div className="bg-blue-100 border border-blue-300 rounded p-3 mb-4">
+                          <p className="text-blue-800 text-sm font-medium">
+                            🔧 Development Mode: SEB requirement bypassed for testing
+                          </p>
+                        </div>
+                      ) : (
+                        <SEBConfigDownload courseId={courseId} sessionId={examSession?.id} />
+                      )}
                     </div>
                   </div>
                 </div>
@@ -610,7 +940,7 @@ export default function SecureExamPage() {
                     <div className="space-y-3">
                       <div className="flex justify-between">
                         <span className="text-gray-600">Course:</span>
-                        <span className="font-medium">
+                        <span className="font-medium text-right">
                           {examSession.courseName}
                         </span>
                       </div>
@@ -641,9 +971,9 @@ export default function SecureExamPage() {
                         </span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Session ID:</span>
-                        <span className="font-mono text-xs">
-                          {examSession.id.substring(0, 8)}...
+                        <span className="text-gray-600">Attempts:</span>
+                        <span className="font-medium">
+                          {examSession.currentAttempt}/{examSession.allowedAttempts}
                         </span>
                       </div>
                     </div>
@@ -651,126 +981,89 @@ export default function SecureExamPage() {
                 </div>
               )}
 
-              {/* System Requirements */}
+              {/* System Requirements Check */}
               <div className="mb-8">
                 <h2 className="text-xl font-bold text-[#001e62] mb-6 flex items-center">
                   <Settings className="w-5 h-5 mr-2" />
-                  System Requirements Check
+                  System Security Check
                 </h2>
                 <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  <div
-                    className={`p-4 rounded-lg border-2 ${
-                      systemChecks.seb
-                        ? "border-green-200 bg-green-50"
-                        : "border-yellow-200 bg-yellow-50"
-                    }`}
-                  >
+                  <div className="p-4 rounded-lg border-2 border-gray-200 bg-white">
                     <div className="flex items-center justify-between mb-2">
-                      <Shield
-                        className={`w-6 h-6 ${
-                          systemChecks.seb
-                            ? "text-green-600"
-                            : "text-yellow-600"
-                        }`}
-                      />
-                      {systemChecks.seb ? (
-                        <CheckCircle2 className="w-5 h-5 text-green-600" />
-                      ) : (
-                        <AlertTriangle className="w-5 h-5 text-yellow-600" />
-                      )}
+                      <Shield className="w-6 h-6 text-[#001e62]" />
+                      {getSystemCheckIcon(systemChecks.seb)}
                     </div>
                     <div className="font-medium">Safe Exam Browser</div>
                     <div className="text-sm text-gray-600">
-                      {isSEB ? `Active (v${sebVersion})` : "Recommended"}
+                      {isSEB ? `Active (${sebVersion})` : 'Not Detected'}
                     </div>
                   </div>
 
-                  <div
-                    className={`p-4 rounded-lg border-2 ${
-                      systemChecks.camera || isSEB
-                        ? "border-green-200 bg-green-50"
-                        : "border-red-200 bg-red-50"
-                    }`}
-                  >
+                  <div className="p-4 rounded-lg border-2 border-gray-200 bg-white">
                     <div className="flex items-center justify-between mb-2">
-                      <Camera
-                        className={`w-6 h-6 ${
-                          systemChecks.camera || isSEB
-                            ? "text-green-600"
-                            : "text-red-600"
-                        }`}
-                      />
-                      {systemChecks.camera || isSEB ? (
-                        <CheckCircle2 className="w-5 h-5 text-green-600" />
-                      ) : (
-                        <AlertTriangle className="w-5 h-5 text-red-600" />
-                      )}
+                      <Camera className="w-6 h-6 text-[#001e62]" />
+                      {getSystemCheckIcon(systemChecks.camera || isSEB)}
                     </div>
                     <div className="font-medium">Camera Access</div>
                     <div className="text-sm text-gray-600">
-                      {isSEB
-                        ? "Managed by SEB"
-                        : systemChecks.camera
-                        ? "Available"
-                        : "Permission needed"}
+                      {isSEB ? 'Managed by SEB' : systemChecks.camera ? 'Available' : 'Permission needed'}
                     </div>
                   </div>
 
-                  <div
-                    className={`p-4 rounded-lg border-2 ${
-                      systemChecks.browser
-                        ? "border-green-200 bg-green-50"
-                        : "border-red-200 bg-red-50"
-                    }`}
-                  >
+                  <div className="p-4 rounded-lg border-2 border-gray-200 bg-white">
                     <div className="flex items-center justify-between mb-2">
-                      <Monitor
-                        className={`w-6 h-6 ${
-                          systemChecks.browser
-                            ? "text-green-600"
-                            : "text-red-600"
-                        }`}
-                      />
-                      {systemChecks.browser ? (
-                        <CheckCircle2 className="w-5 h-5 text-green-600" />
-                      ) : (
-                        <AlertTriangle className="w-5 h-5 text-red-600" />
-                      )}
+                      <Monitor className="w-6 h-6 text-[#001e62]" />
+                      {getSystemCheckIcon(systemChecks.browser)}
                     </div>
-                    <div className="font-medium">Compatible Browser</div>
+                    <div className="font-medium">Browser Compatibility</div>
                     <div className="text-sm text-gray-600">
-                      {systemChecks.browser
-                        ? "Supported browser"
-                        : "Unsupported browser"}
+                      {systemChecks.browser ? 'Supported' : 'Unsupported'}
                     </div>
                   </div>
 
-                  <div
-                    className={`p-4 rounded-lg border-2 ${
-                      systemChecks.connection
-                        ? "border-green-200 bg-green-50"
-                        : "border-red-200 bg-red-50"
-                    }`}
-                  >
+                  <div className="p-4 rounded-lg border-2 border-gray-200 bg-white">
                     <div className="flex items-center justify-between mb-2">
-                      <Wifi
-                        className={`w-6 h-6 ${
-                          systemChecks.connection
-                            ? "text-green-600"
-                            : "text-red-600"
-                        }`}
-                      />
-                      {systemChecks.connection ? (
-                        <CheckCircle2 className="w-5 h-5 text-green-600" />
-                      ) : (
-                        <AlertTriangle className="w-5 h-5 text-red-600" />
-                      )}
+                      <Wifi className="w-6 h-6 text-[#001e62]" />
+                      {getSystemCheckIcon(systemChecks.connection)}
                     </div>
                     <div className="font-medium">Internet Connection</div>
                     <div className="text-sm text-gray-600">
-                      {systemChecks.connection ? "Connected" : "Disconnected"}
+                      {systemChecks.connection ? 'Connected' : 'Disconnected'}
                     </div>
                   </div>
+
+                  <div className="p-4 rounded-lg border-2 border-gray-200 bg-white">
+                    <div className="flex items-center justify-between mb-2">
+                      <Eye className="w-6 h-6 text-[#001e62]" />
+                      {getSystemCheckIcon(isFullscreen || isSEB)}
+                    </div>
+                    <div className="font-medium">Display Mode</div>
+                    <div className="text-sm text-gray-600">
+                      {isSEB ? 'SEB Controlled' : isFullscreen ? 'Fullscreen' : 'Windowed'}
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-lg border-2 border-gray-200 bg-white">
+                    <div className="flex items-center justify-between mb-2">
+                      <Lock className="w-6 h-6 text-[#001e62]" />
+                      {getSystemCheckIcon(securityValidated || process.env.NODE_ENV === 'development')}
+                    </div>
+                    <div className="font-medium">Security Validation</div>
+                    <div className="text-sm text-gray-600">
+                      {process.env.NODE_ENV === 'development' ? 'Dev Mode' : securityValidated ? 'Validated' : 'Pending'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* System Check Actions */}
+                <div className="mt-6 flex justify-center">
+                  <button
+                    onClick={performSystemChecks}
+                    className="inline-flex items-center px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+                  >
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                    Refresh System Check
+                  </button>
                 </div>
               </div>
 
@@ -779,7 +1072,7 @@ export default function SecureExamPage() {
                 <div className="mb-8">
                   <h3 className="text-lg font-semibold text-[#001e62] mb-4 flex items-center">
                     <Eye className="w-5 h-5 mr-2" />
-                    Camera Preview
+                    Proctoring Preview
                   </h3>
                   <div className="relative bg-gray-100 rounded-lg overflow-hidden max-w-md mx-auto">
                     <video
@@ -796,38 +1089,30 @@ export default function SecureExamPage() {
                 </div>
               )}
 
-              {/* Academic Integrity Agreement */}
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-6 mb-8">
-                <h3 className="text-lg font-semibold text-amber-800 mb-4 flex items-center">
+              {/* Security Agreement */}
+              <div className="bg-red-50 border border-red-200 rounded-lg p-6 mb-8">
+                <h3 className="text-lg font-semibold text-red-800 mb-4 flex items-center">
                   <AlertTriangle className="w-5 h-5 mr-2" />
                   Academic Integrity Agreement
                 </h3>
-                <div className="text-sm text-amber-700 space-y-3">
-                  <p className="font-medium">
-                    By starting this exam, I agree that:
-                  </p>
+                <div className="text-sm text-red-700 space-y-3">
+                  <p className="font-medium">By starting this exam, I acknowledge that:</p>
                   <ul className="space-y-2 ml-4">
-                    <li>
-                      • I will not use external resources or assistance during
-                      this exam
-                    </li>
-                    <li>
-                      • I understand this session may be monitored for security
-                      purposes
-                    </li>
-                    <li>
-                      • I will not switch applications, tabs, or leave the exam
-                      environment
-                    </li>
-                    <li>
-                      • Security violations may result in immediate exam
-                      termination
-                    </li>
-                    <li>
-                      • This exam represents my individual knowledge and
-                      abilities
-                    </li>
+                    <li>• This exam session will be monitored for security purposes</li>
+                    <li>• I will not use external resources, assistance, or unauthorized materials</li>
+                    <li>• I will not attempt to circumvent security measures</li>
+                    <li>• Security violations may result in immediate exam termination</li>
+                    <li>• This exam represents my individual knowledge and abilities</li>
+                    <li>• I understand the consequences of academic dishonesty</li>
                   </ul>
+                  <div className="mt-4 p-3 bg-red-100 rounded">
+                    <p className="font-medium text-red-900">
+                      Current Security Level: {isSEB ? 'Maximum (SEB)' : 'Standard (Browser)'}
+                    </p>
+                    <p className="text-xs text-red-700 mt-1">
+                      Active monitoring includes: {isSEB ? 'Full system lockdown' : 'Browser monitoring, camera surveillance'}
+                    </p>
+                  </div>
                 </div>
               </div>
 
@@ -835,7 +1120,7 @@ export default function SecureExamPage() {
               <div className="text-center">
                 <button
                   onClick={startExam}
-                  disabled={!examSession || questions.length === 0}
+                  disabled={!examSession || questions.length === 0 || (process.env.NODE_ENV === 'production' && !isSEB)}
                   className="px-8 py-4 bg-[#001e62] text-white rounded-lg text-lg font-semibold hover:bg-[#003a8c] disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center mx-auto shadow-lg"
                 >
                   <Play className="w-5 h-5 mr-2" />
@@ -843,7 +1128,9 @@ export default function SecureExamPage() {
                 </button>
                 <p className="text-sm text-gray-500 mt-4">
                   {examSession && questions.length > 0
-                    ? `Ready to start - ${questions.length} questions loaded`
+                    ? process.env.NODE_ENV === 'production' && !isSEB
+                      ? "Safe Exam Browser required to start"
+                      : `Ready to start - ${questions.length} questions loaded`
                     : "Loading exam data..."}
                 </p>
               </div>
@@ -892,6 +1179,13 @@ export default function SecureExamPage() {
         </div>
       )}
 
+      {violations.length >= 2 && (
+        <div className="fixed top-12 left-0 right-0 bg-orange-600 text-white p-2 text-center z-40">
+          <AlertTriangle className="w-4 h-4 inline mr-2" />
+          WARNING: {violations.length} security violations detected
+        </div>
+      )}
+
       {/* Main Content */}
       <div
         className="p-6"
@@ -913,6 +1207,9 @@ export default function SecureExamPage() {
                 <span>
                   Answered: {answeredCount}/{questions.length}
                 </span>
+                <span>
+                  Violations: {violations.length}
+                </span>
               </div>
             </div>
             <div className="text-right">
@@ -920,6 +1217,11 @@ export default function SecureExamPage() {
                 {formatTime(timeRemaining)}
               </div>
               <div className="text-sm text-blue-200">Time Remaining</div>
+              {violations.length > 0 && (
+                <div className="text-xs text-red-300 mt-1">
+                  ⚠️ {violations.length} violations
+                </div>
+              )}
             </div>
           </div>
 
@@ -930,13 +1232,38 @@ export default function SecureExamPage() {
               style={{ width: `${progress}%` }}
             />
           </div>
+
+          {/* Security Status */}
+          <div className="flex items-center text-sm text-blue-200">
+            <Shield className="w-4 h-4 mr-2" />
+            <span>
+              Security: {isSEB ? 'SEB Protected' : 'Browser Monitored'} | 
+              Monitoring: {systemChecks.camera ? 'Camera Active' : 'Camera Off'} |
+              Session: {examSession?.id.substring(0, 8)}...
+            </span>
+          </div>
         </div>
 
         {/* Question */}
         <div className="bg-white/10 backdrop-blur rounded-lg p-8 mb-6">
-          <h2 className="text-xl font-semibold leading-relaxed mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-semibold">
+              Question {currentQuestion + 1}
+            </h2>
+            {currentQ.difficulty && (
+              <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                currentQ.difficulty === 'EASY' ? 'bg-green-500/20 text-green-300' :
+                currentQ.difficulty === 'MEDIUM' ? 'bg-yellow-500/20 text-yellow-300' :
+                'bg-red-500/20 text-red-300'
+              }`}>
+                {currentQ.difficulty}
+              </span>
+            )}
+          </div>
+          
+          <h3 className="text-lg leading-relaxed mb-6">
             {currentQ.question}
-          </h2>
+          </h3>
 
           <div className="space-y-4">
             {currentQ.options.map((option, index) => (
@@ -1013,7 +1340,7 @@ export default function SecureExamPage() {
               >
                 {isSubmitting ? (
                   <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                     Submitting...
                   </>
                 ) : (
@@ -1040,7 +1367,7 @@ export default function SecureExamPage() {
       <div className="fixed bottom-6 right-6 bg-black/60 backdrop-blur text-white p-4 rounded-lg text-sm z-20">
         <h4 className="font-semibold mb-3 flex items-center">
           <Activity className="w-4 h-4 mr-2" />
-          Progress
+          Exam Status
         </h4>
         <div className="space-y-2">
           <div className="flex justify-between">
@@ -1059,8 +1386,37 @@ export default function SecureExamPage() {
               {isSEB ? "SEB" : "Browser"}
             </span>
           </div>
+          <div className="flex justify-between">
+            <span>Violations:</span>
+            <span className={violations.length > 0 ? "text-red-400" : "text-green-400"}>
+              {violations.length}
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span>Time:</span>
+            <span className={timeRemaining < 300 ? "text-red-400" : "text-white"}>
+              {formatTime(timeRemaining)}
+            </span>
+          </div>
         </div>
       </div>
+
+      {/* Camera Monitor (non-SEB only) */}
+      {!isSEB && systemChecks.camera && (
+        <div className="fixed bottom-6 left-6 w-48 h-36 bg-black rounded-lg overflow-hidden z-20">
+          <video
+            ref={videoRef}
+            autoPlay
+            muted
+            className="w-full h-full object-cover"
+          />
+          <div className="absolute top-2 left-2 bg-red-500 text-white px-2 py-1 rounded text-xs flex items-center">
+            <div className="w-1.5 h-1.5 bg-white rounded-full mr-1 animate-pulse"></div>
+            REC
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+        
