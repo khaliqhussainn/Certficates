@@ -1,4 +1,4 @@
-// middleware.ts - SEB Header Validation Middleware
+// middleware.ts - FIXED VERSION FOR DEVELOPMENT
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
@@ -34,11 +34,12 @@ function validateSEBHeaders(request: NextRequest): { isValid: boolean; sebDetect
   const isDevelopment = process.env.NODE_ENV === 'development';
   const bypassHeader = request.headers.get('X-SEB-Bypass');
   
-  if (isDevelopment && bypassHeader === process.env.SEB_BYPASS_KEY) {
-    return { isValid: true, sebDetected: true };
+  if (isDevelopment) {
+    // Allow all exam access in development mode
+    return { isValid: true, sebDetected: sebDetected };
   }
   
-  // Validate based on available security keys
+  // Production validation
   const isValid = !!(browserExamKey && configKey) || // Modern SEB with both keys
                   !!(browserExamKey || configKey) ||   // Legacy SEB with one key
                   sebDetected;                         // Basic SEB detection
@@ -56,7 +57,8 @@ function createSEBErrorResponse(request: NextRequest) {
         error: 'SEB_REQUIRED',
         message: 'Safe Exam Browser is required to access this resource',
         sebRequired: true,
-        detectedSEB: false
+        detectedSEB: false,
+        environment: process.env.NODE_ENV
       },
       { status: 403 }
     );
@@ -77,13 +79,33 @@ export function middleware(request: NextRequest) {
     pathname.startsWith('/_next/') ||
     pathname.startsWith('/api/auth/') ||
     pathname.startsWith('/static/') ||
+    pathname.startsWith('/favicon.ico') ||
     pathname.includes('.') ||
-    pathname === '/favicon.ico'
+    pathname === '/api/ping' ||
+    pathname.startsWith('/api/courses/public') ||
+    pathname.startsWith('/api/certificate/verify')
   ) {
     return NextResponse.next();
   }
+
+  // In development mode, log access but don't block
+  if (process.env.NODE_ENV === 'development') {
+    const needsSEB = requiresSEBValidation(pathname);
+    const isSEBMode = searchParams.get('seb') === 'true';
+    
+    if (needsSEB || isSEBMode) {
+      console.log(`🔍 DEV MODE: Allowing access to ${pathname} (would require SEB in production)`);
+      
+      const response = NextResponse.next();
+      response.headers.set('X-SEB-Dev-Mode', 'true');
+      response.headers.set('X-SEB-Warning', 'Development mode - SEB validation bypassed');
+      return response;
+    }
+    
+    return NextResponse.next();
+  }
   
-  // Check if this route requires SEB validation
+  // Production mode - enforce SEB validation
   const needsSEB = requiresSEBValidation(pathname);
   const isSEBMode = searchParams.get('seb') === 'true';
   
@@ -123,17 +145,8 @@ export function middleware(request: NextRequest) {
     return response;
   }
   
-  // For exam routes in development, show warning but allow access
-  if (process.env.NODE_ENV === 'development' && pathname.startsWith('/exam/')) {
-    console.warn('⚠️ SEB not detected in development mode - this would block in production');
-    
-    const response = NextResponse.next();
-    response.headers.set('X-SEB-Warning', 'SEB not detected - development mode');
-    return response;
-  }
-  
-  // Block access if SEB is required but not detected
-  console.log(`🚫 SEB required but not detected for ${pathname}`);
+  // Block access if SEB is required but not detected (production only)
+  console.log(`🚫 PRODUCTION: SEB required but not detected for ${pathname}`);
   return createSEBErrorResponse(request);
 }
 
