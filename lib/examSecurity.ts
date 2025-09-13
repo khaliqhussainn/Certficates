@@ -1,4 +1,6 @@
-// lib/examSecurity.ts
+
+// 5. lib/examSecurity.ts - UPDATED WITHOUT PAYMENT CHECK
+
 import { prisma } from './prisma';
 import crypto from 'crypto';
 
@@ -31,20 +33,22 @@ export class ExamSecurityService {
     return crypto.createHash('sha256').update(data).digest('hex');
   }
 
-  // Start secure exam session
+  // Start secure exam session (no payment required)
   async startExamSession(userId: string, courseId: string, browserData: BrowserData, ipAddress: string) {
     try {
-      // Check if user has paid for exam
-      const payment = await prisma.payment.findFirst({
+      // REMOVED: Payment check - users can now take exams for free
+
+      // Check if user already has certificate
+      const existingCertificate = await prisma.certificate.findFirst({
         where: {
           userId,
           courseId,
-          status: 'COMPLETED',
+          isRevoked: false,
         },
       });
 
-      if (!payment) {
-        throw new Error('Payment required for exam access');
+      if (existingCertificate) {
+        throw new Error('Certificate already obtained for this course');
       }
 
       // Check for existing active sessions

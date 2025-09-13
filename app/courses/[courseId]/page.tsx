@@ -44,7 +44,7 @@ interface Course {
   totalQuestions: number;
   rating?: number;
   price?: number;
-  isFree?: boolean;
+  is?: boolean;
   instructor?: string;
   estimatedStudyTime?: string;
   skillsGained?: string[];
@@ -58,6 +58,7 @@ interface UserStatus {
   hasCompleted: boolean;
   hasCertificate: boolean;
   canTakeExam: boolean;
+  Access?: boolean;
   payment?: {
     status: string;
     amount: number;
@@ -107,10 +108,11 @@ export default function CourseDetailsPage() {
         if (statusResponse.ok) {
           const statusData = await statusResponse.json();
           setUserStatus({
-            hasBooked: !!statusData.payment,
+            hasBooked: true, // Always true since no payment required
             hasCompleted: !!statusData.completion,
             hasCertificate: !!statusData.certificate,
             canTakeExam: statusData.canTakeExam,
+            Access: statusData.Access,
             payment: statusData.payment,
             examAttempts: statusData.examAttempts || [],
             certificate: statusData.certificate
@@ -131,48 +133,14 @@ export default function CourseDetailsPage() {
       return;
     }
 
-    if (!userStatus?.hasBooked) {
-      // Scroll to certificate section
-      setActiveTab('certificate');
-      document.getElementById('certificate-section')?.scrollIntoView({ behavior: 'smooth' });
+    if (userStatus?.hasCertificate) {
+      // View certificate
+      router.push(`/dashboard/courses/${courseId}`);
       return;
     }
 
-    if (!userStatus?.canTakeExam) {
-      alert('Complete the course first to take the certificate exam.');
-      return;
-    }
-
-    // Redirect to secure exam environment
+    // Go directly to exam - no payment required
     router.push(`/exam/${courseId}`);
-  };
-
-  const handleBookCertificate = async () => {
-    if (!session) {
-      router.push('/auth/signin');
-      return;
-    }
-
-    try {
-      const response = await fetch('/api/payments/create-exam-payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ courseId })
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        // Handle payment flow here
-        console.log('Payment created:', data);
-        // You would integrate with Stripe here
-      } else {
-        const errorData = await response.json();
-        alert(errorData.error || 'Failed to create payment');
-      }
-    } catch (error) {
-      console.error('Payment error:', error);
-      alert('Payment failed. Please try again.');
-    }
   };
 
   const formatDuration = (minutes: number) => {
@@ -188,12 +156,6 @@ export default function CourseDetailsPage() {
       case 'advanced': return 'bg-red-100 text-red-800';
       default: return 'bg-gray-100 text-gray-800';
     }
-  };
-
-  const getFinalPrice = () => {
-    if (!course) return 0;
-    const discount = course.certificateDiscount || 0;
-    return course.certificatePrice * (1 - discount / 100);
   };
 
   if (loading) {
@@ -268,22 +230,17 @@ export default function CourseDetailsPage() {
               {/* User Status */}
               {session && userStatus && (
                 <div className="bg-white/10 backdrop-blur rounded-lg p-4 mb-6">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between mb-4">
                     <div>
                       {userStatus.hasCertificate ? (
                         <div className="flex items-center text-green-300">
                           <Award className="w-5 h-5 mr-2" />
                           <span className="font-medium">Certificate Earned!</span>
                         </div>
-                      ) : userStatus.hasBooked ? (
-                        <div className="flex items-center text-blue-300">
-                          <CheckCircle2 className="w-5 h-5 mr-2" />
-                          <span className="font-medium">Exam Booked</span>
-                        </div>
                       ) : (
-                        <div className="flex items-center text-yellow-300">
-                          <AlertCircle className="w-5 h-5 mr-2" />
-                          <span className="font-medium">Certificate Available</span>
+                        <div className="flex items-center text-green-300">
+                          <CheckCircle2 className="w-5 h-5 mr-2" />
+                          <span className="font-medium"> Certificate Exam Available</span>
                         </div>
                       )}
                     </div>
@@ -296,18 +253,27 @@ export default function CourseDetailsPage() {
                           <Award className="w-4 h-4 mr-2" />
                           View Certificate
                         </>
-                      ) : userStatus.canTakeExam ? (
-                        <>
-                          <Play className="w-4 h-4 mr-2" />
-                          Take Exam
-                        </>
                       ) : (
                         <>
-                          <CreditCard className="w-4 h-4 mr-2" />
-                          Book Certificate
+                          <Play className="w-4 h-4 mr-2" />
+                          Take  Exam
                         </>
                       )}
                     </button>
+                  </div>
+                  <div className="grid grid-cols-3 gap-4 text-sm">
+                    <div className="flex items-center justify-between">
+                      <span className="text-blue-200">Passing Score:</span>
+                      <span className="font-medium">{course.passingScore}%</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-blue-200">Attempts:</span>
+                      <span className="font-medium">Unlimited</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-blue-200">Cost:</span>
+                      <span className="font-medium text-green-300"></span>
+                    </div>
                   </div>
                 </div>
               )}
@@ -317,7 +283,7 @@ export default function CourseDetailsPage() {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="font-medium">Ready to get certified?</p>
-                      <p className="text-blue-200 text-sm">Sign in to book your certificate exam</p>
+                      <p className="text-blue-200 text-sm">Sign in to take your  certificate exam</p>
                     </div>
                     <button
                       onClick={() => router.push('/auth/signin')}
@@ -347,11 +313,13 @@ export default function CourseDetailsPage() {
               </div>
               
               {/* Certificate Badge */}
-              <div className="absolute -bottom-6 -right-6 bg-yellow-400 text-yellow-900 rounded-full p-4 shadow-lg">
+              <div className="absolute -bottom-6 -right-6 bg-green-400 text-green-900 rounded-full p-4 shadow-lg">
                 <Award className="w-8 h-8" />
               </div>
             </div>
           </div>
+
+       
         </div>
       </div>
 
@@ -361,7 +329,7 @@ export default function CourseDetailsPage() {
           <nav className="flex space-x-8">
             {[
               { id: 'overview', label: 'Overview', icon: BookOpen },
-              { id: 'certificate', label: 'Certificate', icon: Award },
+              { id: 'certificate', label: ' Certificate', icon: Award },
               { id: 'requirements', label: 'Requirements', icon: Shield }
             ].map((tab) => (
               <button
@@ -476,33 +444,28 @@ export default function CourseDetailsPage() {
               </div>
 
               {/* Certificate Preview */}
-              <div className="bg-gradient-to-br from-yellow-50 to-orange-50 border border-yellow-200 rounded-lg p-6">
+              <div className="bg-gradient-to-br from-green-50 to-emerald-50 border border-green-200 rounded-lg p-6">
                 <div className="flex items-center mb-4">
-                  <Award className="w-6 h-6 text-yellow-600 mr-3" />
-                  <h3 className="font-semibold text-yellow-900">Professional Certificate</h3>
+                  <Award className="w-6 h-6 text-green-600 mr-3" />
+                  <h3 className="font-semibold text-green-900"> Professional Certificate</h3>
                 </div>
-                <p className="text-yellow-800 text-sm mb-4">
-                  Earn an industry-recognized certificate upon successful completion of the exam.
+                <p className="text-green-800 text-sm mb-4">
+                  Earn an industry-recognized certificate at no cost upon successful completion of the exam.
                 </p>
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
-                    <span className="text-yellow-700">Certificate Fee:</span>
-                    <span className="font-semibold text-yellow-900">
-                      ${getFinalPrice().toFixed(2)}
-                      {course.certificateDiscount && course.certificateDiscount > 0 && (
-                        <span className="ml-2 text-xs line-through text-yellow-600">
-                          ${course.certificatePrice.toFixed(2)}
-                        </span>
-                      )}
+                    <span className="text-green-700">Certificate Fee:</span>
+                    <span className="font-semibold text-green-900">
+                      
                     </span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-yellow-700">Validity:</span>
-                    <span className="font-semibold text-yellow-900">Lifetime</span>
+                    <span className="text-green-700">Validity:</span>
+                    <span className="font-semibold text-green-900">Lifetime</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-yellow-700">Verification:</span>
-                    <span className="font-semibold text-yellow-900">Blockchain</span>
+                    <span className="text-green-700">Verification:</span>
+                    <span className="font-semibold text-green-900">Digital</span>
                   </div>
                 </div>
               </div>
@@ -514,10 +477,45 @@ export default function CourseDetailsPage() {
           <div id="certificate-section" className="max-w-4xl mx-auto">
             <div className="text-center mb-12">
               <Award className="w-16 h-16 text-[#001e62] mx-auto mb-4" />
-              <h2 className="text-3xl font-bold text-gray-900 mb-4">Professional Certificate</h2>
+              <h2 className="text-3xl font-bold text-gray-900 mb-4"> Professional Certificate</h2>
               <p className="text-xl text-gray-600">
-                Validate your expertise with an industry-recognized certificate
+                Validate your expertise with an industry-recognized certificate - completely !
               </p>
+            </div>
+
+            {/*  Access Banner */}
+            <div className="bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-2xl p-8 text-center mb-8">
+              <h3 className="text-2xl font-bold mb-4">🎉  Certificate Exam!</h3>
+              <div className="text-4xl font-bold mb-2">
+                
+              </div>
+              <p className="text-green-100 mb-8">
+                Limited time offer - Take your certificate exam for !
+              </p>
+
+              {session ? (
+                userStatus?.hasCertificate ? (
+                  <div className="bg-white/20 text-white py-3 px-6 rounded-lg inline-flex items-center">
+                    <Award className="w-5 h-5 mr-2" />
+                    Certificate Already Earned
+                  </div>
+                ) : (
+                  <button
+                    onClick={handleProceedToExam}
+                    className="bg-white text-green-600 py-3 px-8 rounded-lg font-semibold hover:bg-gray-100 transition-colors inline-flex items-center"
+                  >
+                    <Play className="w-5 h-5 mr-2" />
+                    Take  Exam Now
+                  </button>
+                )
+              ) : (
+                <button
+                  onClick={() => router.push('/auth/signin')}
+                  className="bg-white text-green-600 py-3 px-8 rounded-lg font-semibold hover:bg-gray-100 transition-colors"
+                >
+                  Sign In to Take  Exam
+                </button>
+              )}
             </div>
 
             <div className="grid md:grid-cols-2 gap-8 mb-12">
@@ -527,7 +525,7 @@ export default function CourseDetailsPage() {
                 <div className="space-y-3">
                   {[
                     'Industry-recognized credential',
-                    'Blockchain-verified authenticity',
+                    'Digital verification',
                     'Lifetime validity',
                     'Downloadable PDF certificate',
                     'LinkedIn profile integration',
@@ -566,101 +564,12 @@ export default function CourseDetailsPage() {
                     <span className="font-medium">Unlimited</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-gray-600">Security:</span>
-                    <span className="font-medium flex items-center">
-                      <Shield className="w-4 h-4 mr-1" />
-                      SEB Protected
-                    </span>
+                    <span className="text-gray-600">Cost:</span>
+                    <span className="font-medium text-green-600"></span>
                   </div>
                 </div>
               </div>
             </div>
-
-            {/* Pricing */}
-            <div className="bg-gradient-to-r from-[#001e62] to-[#003a8c] text-white rounded-2xl p-8 text-center">
-              <h3 className="text-2xl font-bold mb-4">Certificate Exam</h3>
-              <div className="text-4xl font-bold mb-2">
-                ${getFinalPrice().toFixed(2)}
-                {course.certificateDiscount && course.certificateDiscount > 0 && (
-                  <span className="text-lg line-through text-blue-300 ml-2">
-                    ${course.certificatePrice.toFixed(2)}
-                  </span>
-                )}
-              </div>
-              {course.certificateDiscount && course.certificateDiscount > 0 && (
-                <p className="text-green-300 mb-6">
-                  Save {course.certificateDiscount}% - Limited Time Offer!
-                </p>
-              )}
-              <p className="text-blue-100 mb-8">
-                One-time payment • Lifetime access • Unlimited attempts
-              </p>
-
-              {session ? (
-                userStatus?.hasCertificate ? (
-                  <div className="bg-green-500 text-white py-3 px-6 rounded-lg inline-flex items-center">
-                    <Award className="w-5 h-5 mr-2" />
-                    Certificate Earned
-                  </div>
-                ) : userStatus?.hasBooked ? (
-                  <button
-                    onClick={handleProceedToExam}
-                    className="bg-white text-[#001e62] py-3 px-8 rounded-lg font-semibold hover:bg-gray-100 transition-colors inline-flex items-center"
-                  >
-                    <Play className="w-5 h-5 mr-2" />
-                    Take Exam Now
-                  </button>
-                ) : (
-                  <button
-                    onClick={handleBookCertificate}
-                    className="bg-white text-[#001e62] py-3 px-8 rounded-lg font-semibold hover:bg-gray-100 transition-colors inline-flex items-center"
-                  >
-                    <CreditCard className="w-5 h-5 mr-2" />
-                    Book Certificate Exam
-                  </button>
-                )
-              ) : (
-                <button
-                  onClick={() => router.push('/auth/signin')}
-                  className="bg-white text-[#001e62] py-3 px-8 rounded-lg font-semibold hover:bg-gray-100 transition-colors"
-                >
-                  Sign In to Book Exam
-                </button>
-              )}
-            </div>
-
-            {/* User Progress */}
-            {session && userStatus && (
-              <div className="mt-8 bg-gray-50 rounded-lg p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Your Progress</h3>
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-gray-600">Course Completion:</span>
-                    <span className={`font-medium ${userStatus.hasCompleted ? 'text-green-600' : 'text-gray-500'}`}>
-                      {userStatus.hasCompleted ? 'Completed' : 'Optional'}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-gray-600">Exam Payment:</span>
-                    <span className={`font-medium ${userStatus.hasBooked ? 'text-green-600' : 'text-gray-500'}`}>
-                      {userStatus.hasBooked ? 'Paid' : 'Pending'}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-gray-600">Certificate Status:</span>
-                    <span className={`font-medium ${userStatus.hasCertificate ? 'text-green-600' : 'text-gray-500'}`}>
-                      {userStatus.hasCertificate ? 'Earned' : 'Not Earned'}
-                    </span>
-                  </div>
-                  {userStatus.examAttempts && userStatus.examAttempts.length > 0 && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-gray-600">Exam Attempts:</span>
-                      <span className="font-medium">{userStatus.examAttempts.length}</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
           </div>
         )}
 
@@ -683,11 +592,10 @@ export default function CourseDetailsPage() {
                 </h3>
                 <div className="space-y-3">
                   {[
-                    'Safe Exam Browser (SEB) installed',
+                    'Safe Exam Browser (SEB) recommended',
                     'Stable internet connection (minimum 5 Mbps)',
                     'Computer with webcam and microphone',
                     'Updated browser (Chrome, Firefox, Edge)',
-                    'Administrative privileges to install SEB',
                     'Quiet, well-lit testing environment'
                   ].map((requirement, index) => (
                     <div key={index} className="flex items-start">
@@ -706,7 +614,7 @@ export default function CourseDetailsPage() {
                 </h3>
                 <div className="space-y-3">
                   {[
-                    'Real-time proctoring and monitoring',
+                    'Real-time monitoring and supervision',
                     'Screen recording prevention',
                     'Application switching detection',
                     'Copy/paste blocking',
@@ -739,76 +647,6 @@ export default function CourseDetailsPage() {
                 </div>
               </div>
             )}
-
-            {/* SEB Download Section */}
-            <div className="mt-8 bg-blue-50 border border-blue-200 rounded-lg p-6">
-              <h3 className="text-xl font-semibold text-blue-900 mb-4 flex items-center">
-                <Download className="w-5 h-5 mr-2" />
-                Safe Exam Browser Setup
-              </h3>
-              <p className="text-blue-800 mb-4">
-                Safe Exam Browser (SEB) is required for all certificate exams to ensure security and integrity.
-              </p>
-              <div className="flex flex-col sm:flex-row gap-4">
-                <a
-                  href="https://safeexambrowser.org/download_en.html"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors inline-flex items-center justify-center"
-                >
-                  <Download className="w-4 h-4 mr-2" />
-                  Download SEB Browser
-                </a>
-                <button
-                  onClick={() => router.push(`/seb-required?returnUrl=/exam/${courseId}`)}
-                  className="bg-white text-blue-600 border border-blue-600 px-6 py-3 rounded-lg hover:bg-blue-50 transition-colors inline-flex items-center justify-center"
-                >
-                  <FileText className="w-4 h-4 mr-2" />
-                  Setup Instructions
-                </button>
-              </div>
-            </div>
-
-            {/* Exam Process */}
-            <div className="mt-8">
-              <h3 className="text-2xl font-bold text-gray-900 mb-6">Exam Process</h3>
-              <div className="grid md:grid-cols-4 gap-6">
-                {[
-                  {
-                    step: 1,
-                    title: "Setup SEB",
-                    description: "Install and configure Safe Exam Browser",
-                    icon: Download
-                  },
-                  {
-                    step: 2,
-                    title: "Environment Check",
-                    description: "Verify your testing environment meets requirements",
-                    icon: Monitor
-                  },
-                  {
-                    step: 3,
-                    title: "Security Validation",
-                    description: "Complete identity verification and security checks",
-                    icon: Shield
-                  },
-                  {
-                    step: 4,
-                    title: "Take Exam",
-                    description: "Complete your certificate exam in secure environment",
-                    icon: GraduationCap
-                  }
-                ].map((step) => (
-                  <div key={step.step} className="text-center">
-                    <div className="bg-[#001e62] text-white w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4">
-                      <span className="font-bold">{step.step}</span>
-                    </div>
-                    <h4 className="font-semibold text-gray-900 mb-2">{step.title}</h4>
-                    <p className="text-gray-600 text-sm">{step.description}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
           </div>
         )}
       </div>
@@ -817,7 +655,7 @@ export default function CourseDetailsPage() {
       <div className="bg-gray-50 py-16">
         <div className="max-w-4xl mx-auto text-center px-4 sm:px-6 lg:px-8">
           <h2 className="text-3xl font-bold text-gray-900 mb-4">
-            Ready to Earn Your Certificate?
+            Ready to Earn Your  Certificate?
           </h2>
           <p className="text-xl text-gray-600 mb-8">
             Join thousands of professionals who have advanced their careers with our certificates.
@@ -834,17 +672,8 @@ export default function CourseDetailsPage() {
                 onClick={handleProceedToExam}
                 className="bg-[#001e62] text-white py-4 px-8 rounded-lg text-lg font-semibold hover:bg-[#003a8c] transition-colors inline-flex items-center"
               >
-                {userStatus?.canTakeExam ? (
-                  <>
-                    <Play className="w-6 h-6 mr-3" />
-                    Start Your Exam
-                  </>
-                ) : (
-                  <>
-                    <CreditCard className="w-6 h-6 mr-3" />
-                    Book Certificate Exam
-                  </>
-                )}
+                <Play className="w-6 h-6 mr-3" />
+                Start Your  Exam
                 <ArrowRight className="w-6 h-6 ml-3" />
               </button>
             )
@@ -854,7 +683,7 @@ export default function CourseDetailsPage() {
               className="bg-[#001e62] text-white py-4 px-8 rounded-lg text-lg font-semibold hover:bg-[#003a8c] transition-colors inline-flex items-center"
             >
               <GraduationCap className="w-6 h-6 mr-3" />
-              Get Started Today
+              Get Started Today - !
               <ArrowRight className="w-6 h-6 ml-3" />
             </button>
           )}

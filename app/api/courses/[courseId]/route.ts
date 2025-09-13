@@ -1,4 +1,5 @@
-// app/api/courses/[courseId]/route.ts - UPDATED (Remove completion requirement)
+// 2. app/api/courses/[courseId]/route.ts - COMPLETE FILE WITHOUT PAYMENT REQUIREMENT
+
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { getServerSession } from "next-auth"
@@ -80,14 +81,7 @@ export async function GET(
       }
     })
 
-    // Check if user has paid for exam
-    const payment = await prisma.payment.findFirst({
-      where: {
-        userId: session.user.id,
-        courseId: courseId,
-        status: 'COMPLETED'
-      }
-    })
+    // REMOVED: Payment check - no longer required for exam access
 
     // Get user's exam attempts for this course
     const examAttempts = await prisma.examAttempt.findMany({
@@ -103,18 +97,19 @@ export async function GET(
       course,
       completion,
       certificate,
-      payment,
+      payment: { status: 'FREE_ACCESS', amount: 0 }, // Mock payment object for compatibility
       examAttempts,
-      // UPDATED: Can take exam if paid (regardless of course completion)
-      canTakeExam: !!payment && !certificate,
-      totalQuestions: course.examQuestions?.length || 50,
+      // UPDATED: Can take exam without payment (only blocked if already has certificate)
+      canTakeExam: !certificate,
+      totalQuestions: course.examQuestions?.length || 10,
       // Additional info
       courseCompletionOptional: true,
       examAccessRequirements: {
-        payment: !!payment,
+        payment: false, // No payment required
         courseCompletion: false, // Not required
         certificate: !certificate
-      }
+      },
+      freeAccess: true // Indicate this is free access
     })
 
   } catch (error) {

@@ -1,4 +1,5 @@
-// lib/courseIntegration.ts - UPDATED (Remove completion requirement)
+// 4. lib/courseIntegration.ts - UPDATED WITHOUT PAYMENT REQUIREMENT
+
 import { prisma } from './prisma'
 import crypto from 'crypto'
 
@@ -47,7 +48,6 @@ export class CourseIntegrationService {
   // Verify and sync user from course website
   async syncUserFromCourseWebsite(email: string, password?: string): Promise<any> {
     try {
-      // If course integration is not configured, throw error immediately
       if (!this.isConfigured()) {
         console.error('Course website integration not configured. Missing COURSE_WEBSITE_URL or COURSE_WEBSITE_API_KEY')
         throw new Error('Course website integration not available')
@@ -133,12 +133,10 @@ export class CourseIntegrationService {
     } catch (error) {
       console.error('Course integration error:', error)
       
-      // If it's a network error or course website is down, provide helpful message
       if (error instanceof TypeError && error.message.includes('fetch')) {
         throw new Error('Course website is currently unavailable. Please try direct login or try again later.')
       }
       
-      // Re-throw with original message for auth errors
       throw error
     }
   }
@@ -156,18 +154,17 @@ export class CourseIntegrationService {
         create: {
           id: courseId,
           title: metadata.title,
-          description: `Professional certificate course - course completion not required for exam`,
+          description: `Professional certificate course - free exam access`,
           category: metadata.category,
           level: metadata.level as any,
           isPublished: true,
-          certificatePrice: 99.00,
+          certificatePrice: 0.00, // Free
           passingScore: 70,
           examDuration: 120,
         },
       })
     } catch (error) {
       console.error('Error ensuring course exists:', error)
-      // Don't throw - this is not critical
     }
   }
 
@@ -209,12 +206,12 @@ export class CourseIntegrationService {
             create: {
               id: courseData.id,
               title: courseData.title,
-              description: courseData.description + ' - Course completion not required for certificate exam.',
+              description: courseData.description + ' - Free certificate exam available.',
               category: courseData.category,
               level: courseData.level,
               thumbnail: courseData.thumbnail,
               isPublished: courseData.isPublished,
-              certificatePrice: 99.00, // Default price for certificate
+              certificatePrice: 0.00, // Free certificate
               passingScore: 70,
               examDuration: 120,
               rating: courseData.rating,
@@ -226,8 +223,6 @@ export class CourseIntegrationService {
       }
     } catch (error) {
       console.error('Course sync error:', error)
-      // Don't throw here - just log the error
-      // This allows the app to work even if course sync fails
     }
   }
 
@@ -254,18 +249,9 @@ export class CourseIntegrationService {
     return !!completion
   }
 
-  // Check if user can take exam (only requires payment)
+  // Check if user can take exam (no payment required, only check for existing certificate)
   async canUserTakeExam(userId: string, courseId: string): Promise<boolean> {
-    // Check if user has paid for the exam
-    const payment = await prisma.payment.findFirst({
-      where: {
-        userId,
-        courseId,
-        status: 'COMPLETED'
-      }
-    })
-
-    // Check if user already has certificate
+    // Only check if user already has certificate
     const certificate = await prisma.certificate.findFirst({
       where: {
         userId,
@@ -274,7 +260,8 @@ export class CourseIntegrationService {
       }
     })
 
-    return !!payment && !certificate
+    // Can take exam if no certificate exists (payment no longer required)
+    return !certificate
   }
 
   // Generate secure exam session
@@ -303,7 +290,6 @@ export class CourseIntegrationService {
 
     if (!session) return false
 
-    // Check security parameters
     const isValid = 
       session.browserFingerprint === browserFingerprint &&
       session.ipAddress === ipAddress &&

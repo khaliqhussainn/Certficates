@@ -1,4 +1,5 @@
-// app/api/exam/create-session/route.ts - UPDATED (Remove completion check)
+// 1. app/api/exam/create-session/route.ts - COMPLETE FILE WITHOUT PAYMENT CHECK
+
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
@@ -31,22 +32,21 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Course not found or not available for certification' }, { status: 404 })
     }
 
-    // REMOVED: Course completion requirement
-    // Users can now take the certificate exam without completing the course
-    
-    // Check if user has paid for the exam
-    const payment = await prisma.payment.findFirst({
+    // REMOVED: Payment requirement check - users can now take exams for free
+
+    // Check if user already has certificate
+    const certificate = await prisma.certificate.findFirst({
       where: {
         userId: session.user.id,
-        courseId: courseId,
-        status: 'COMPLETED'
+        courseId,
+        isRevoked: false
       }
     })
 
-    if (!payment) {
+    if (certificate) {
       return NextResponse.json({ 
-        error: 'Payment required for certificate exam. Please book your exam first.' 
-      }, { status: 403 })
+        error: 'You already have a certificate for this course' 
+      }, { status: 400 })
     }
 
     // Check for existing active session
@@ -97,7 +97,7 @@ export async function POST(request: Request) {
         startedAt: examSession.createdAt.toISOString(),
         expiresAt: new Date(Date.now() + (course.examDuration + 10) * 60 * 1000).toISOString(),
         violations: 0,
-        note: 'Course completion not required for this exam'
+        note: 'Free exam access - no payment required'
       }
     })
 
