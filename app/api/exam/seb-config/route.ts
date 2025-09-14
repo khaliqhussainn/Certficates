@@ -1,78 +1,18 @@
-// app/api/exam/seb-config/route.ts - FIXED VERSION FOR SEB v3.10
+// app/api/exam/seb-config/route.ts - PROPER SEB v3.10 BINARY FORMAT
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import crypto from 'crypto'
+import { promisify } from 'util'
+import zlib from 'zlib'
+
+const gzip = promisify(zlib.gzip)
 
 interface SEBConfig {
-  // Basic Settings
-  startURL: string
-  quitURL: string
-  sendBrowserExamKey: boolean
-  allowQuit: boolean
-  hashedQuitPassword: string
-  quitExamPasswordHash: string
-  quitExamText: string
-  
-  // Security lockdown (all disabled for maximum security)
-  ignoreExitKeys: boolean
-  enableF1: boolean
-  enableF3: boolean
-  enableF12: boolean
-  enableCtrlEsc: boolean
-  enableAltEsc: boolean
-  enableAltTab: boolean
-  enableAltF4: boolean
-  enableRightMouse: boolean
-  enablePrintScreen: boolean
-  enableEsc: boolean
-  enableCtrlAltDel: boolean
-  
-  // Browser restrictions
-  allowBrowsingBackForward: boolean
-  allowReload: boolean
-  showReloadButton: boolean
-  allowAddressBar: boolean
-  allowNavigationBar: boolean
-  showNavigationButtons: boolean
-  newBrowserWindowByLinkPolicy: number
-  newBrowserWindowByScriptPolicy: number
-  blockPopUpWindows: boolean
-  
-  // Content restrictions
-  allowCopy: boolean
-  allowCut: boolean
-  allowPaste: boolean
-  allowSpellCheck: boolean
-  allowDictation: boolean
-  
-  // Security monitoring
-  enableLogging: boolean
-  logLevel: number
-  detectVirtualMachine: boolean
-  allowVirtualMachine: boolean
-  forceAppFolderInstall: boolean
-  
-  // URL filtering
-  URLFilterEnable: boolean
-  URLFilterEnableContentFilter: boolean
-  urlFilterRules: Array<{
-    action: number
-    active: boolean
-    expression: string
-  }>
-  
-  // Process restrictions
-  prohibitedProcesses: Array<{
-    active: boolean
-    currentUser: boolean
-    description: string
-    executable: string
-    windowHandling: number
-  }>
+  [key: string]: any
 }
 
-// Generate SEB-compatible configuration
+// Generate proper SEB configuration object (plist structure)
 function generateSEBConfig(courseId: string, sessionId?: string): SEBConfig {
   const baseURL = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || 'http://localhost:3000'
   const sessionParam = sessionId ? `?session=${sessionId}` : ''
@@ -80,21 +20,17 @@ function generateSEBConfig(courseId: string, sessionId?: string): SEBConfig {
   const examURL = `${baseURL}/exam/${courseId}${sessionParam}${sebParam}`
   const quitURL = `${baseURL}/courses/${courseId}`
   
-  // SEB v3.10 expects Base64 encoded password
-  const adminPassword = "admin123"
-  const hashedPassword = Buffer.from(adminPassword).toString('base64')
-  
   return {
-    // Basic Settings
+    // Basic Configuration
     startURL: examURL,
     quitURL: quitURL,
     sendBrowserExamKey: true,
     allowQuit: true,
-    hashedQuitPassword: hashedPassword,
-    quitExamPasswordHash: hashedPassword,
+    hashedQuitPassword: "YWRtaW4xMjM=", // Base64 of "admin123"
+    quitExamPasswordHash: "YWRtaW4xMjM=",
     quitExamText: "Enter administrator password to quit exam:",
     
-    // Complete security lockdown
+    // Security Lockdown
     ignoreExitKeys: true,
     enableF1: false,
     enableF3: false,
@@ -108,166 +44,190 @@ function generateSEBConfig(courseId: string, sessionId?: string): SEBConfig {
     enableEsc: false,
     enableCtrlAltDel: false,
     
-    // Browser restrictions
+    // Browser Settings
     allowBrowsingBackForward: false,
     allowReload: false,
     showReloadButton: false,
     allowAddressBar: false,
     allowNavigationBar: false,
     showNavigationButtons: false,
-    newBrowserWindowByLinkPolicy: 0, // Block new windows
-    newBrowserWindowByScriptPolicy: 0, // Block popup windows
+    newBrowserWindowByLinkPolicy: 0,
+    newBrowserWindowByScriptPolicy: 0,
     blockPopUpWindows: true,
     
-    // Content restrictions
+    // Content Restrictions
     allowCopy: false,
     allowCut: false,
     allowPaste: false,
     allowSpellCheck: false,
     allowDictation: false,
     
-    // Security monitoring
+    // Security Monitoring
     enableLogging: true,
     logLevel: 2,
     detectVirtualMachine: true,
     allowVirtualMachine: false,
     forceAppFolderInstall: true,
     
-    // URL filtering - very restrictive
+    // URL Filtering
     URLFilterEnable: true,
     URLFilterEnableContentFilter: true,
     urlFilterRules: [
-      // Allow only exam URL
       {
-        action: 1, // Allow
+        action: 1,
         active: true,
-        expression: examURL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        expression: examURL
       },
-      // Allow API endpoints for exam
       {
         action: 1,
         active: true,
         expression: `${baseURL}/api/exam/*`
       },
-      // Allow authentication (in case session expires)
       {
         action: 1,
         active: true,
         expression: `${baseURL}/api/auth/*`
       },
-      // Block everything else
       {
-        action: 0, // Block
+        action: 0,
         active: true,
         expression: "*"
       }
     ],
     
-    // Block potentially harmful processes
+    // Prohibited Processes
     prohibitedProcesses: [
-      // Screen recording software
-      { active: true, currentUser: true, description: "Block OBS Studio", executable: "obs", windowHandling: 1 },
-      { active: true, currentUser: true, description: "Block OBS Studio 64", executable: "obs64", windowHandling: 1 },
-      { active: true, currentUser: true, description: "Block Bandicam", executable: "bandicam", windowHandling: 1 },
-      { active: true, currentUser: true, description: "Block Camtasia", executable: "camtasia", windowHandling: 1 },
-      { active: true, currentUser: true, description: "Block Fraps", executable: "fraps", windowHandling: 1 },
-      
-      // Remote access software
-      { active: true, currentUser: true, description: "Block TeamViewer", executable: "TeamViewer", windowHandling: 1 },
-      { active: true, currentUser: true, description: "Block AnyDesk", executable: "AnyDesk", windowHandling: 1 },
-      { active: true, currentUser: true, description: "Block Chrome Remote Desktop", executable: "remoting_host", windowHandling: 1 },
-      { active: true, currentUser: true, description: "Block VNC Viewer", executable: "vncviewer", windowHandling: 1 },
-      
-      // Communication software
-      { active: true, currentUser: true, description: "Block Discord", executable: "Discord", windowHandling: 1 },
-      { active: true, currentUser: true, description: "Block Skype", executable: "Skype", windowHandling: 1 },
-      { active: true, currentUser: true, description: "Block Zoom", executable: "zoom", windowHandling: 1 },
-      { active: true, currentUser: true, description: "Block Microsoft Teams", executable: "Teams", windowHandling: 1 },
-      { active: true, currentUser: true, description: "Block WhatsApp", executable: "WhatsApp", windowHandling: 1 },
-      { active: true, currentUser: true, description: "Block Telegram", executable: "Telegram", windowHandling: 1 },
-      
-      // Web browsers
-      { active: true, currentUser: true, description: "Block Google Chrome", executable: "chrome", windowHandling: 1 },
-      { active: true, currentUser: true, description: "Block Mozilla Firefox", executable: "firefox", windowHandling: 1 },
-      { active: true, currentUser: true, description: "Block Microsoft Edge", executable: "msedge", windowHandling: 1 },
-      { active: true, currentUser: true, description: "Block Safari", executable: "Safari", windowHandling: 1 },
-      { active: true, currentUser: true, description: "Block Opera", executable: "opera", windowHandling: 1 },
-      { active: true, currentUser: true, description: "Block Brave", executable: "brave", windowHandling: 1 },
-      
-      // System utilities
-      { active: true, currentUser: true, description: "Block Task Manager", executable: "taskmgr", windowHandling: 1 },
-      { active: true, currentUser: true, description: "Block Command Prompt", executable: "cmd", windowHandling: 1 },
-      { active: true, currentUser: true, description: "Block PowerShell", executable: "powershell", windowHandling: 1 },
-      { active: true, currentUser: true, description: "Block Registry Editor", executable: "regedit", windowHandling: 1 },
-      { active: true, currentUser: true, description: "Block Control Panel", executable: "control", windowHandling: 1 },
-      
-      // Development tools
-      { active: true, currentUser: true, description: "Block Visual Studio Code", executable: "Code", windowHandling: 1 },
-      { active: true, currentUser: true, description: "Block Visual Studio", executable: "devenv", windowHandling: 1 },
-      { active: true, currentUser: true, description: "Block Notepad++", executable: "notepad++", windowHandling: 1 },
-      
-      // Virtual machines
-      { active: true, currentUser: true, description: "Block VirtualBox", executable: "VirtualBox", windowHandling: 1 },
-      { active: true, currentUser: true, description: "Block VMware", executable: "vmware", windowHandling: 1 },
-      
-      // File managers (only block if running multiple instances)
-      { active: false, currentUser: true, description: "Monitor Windows Explorer", executable: "explorer", windowHandling: 2 }
-    ]
+      {
+        active: true,
+        currentUser: true,
+        description: "Block OBS Studio",
+        executable: "obs",
+        windowHandling: 1
+      },
+      {
+        active: true,
+        currentUser: true,
+        description: "Block TeamViewer",
+        executable: "TeamViewer",
+        windowHandling: 1
+      },
+      {
+        active: true,
+        currentUser: true,
+        description: "Block Discord",
+        executable: "Discord",
+        windowHandling: 1
+      },
+      {
+        active: true,
+        currentUser: true,
+        description: "Block Chrome",
+        executable: "chrome",
+        windowHandling: 1
+      },
+      {
+        active: true,
+        currentUser: true,
+        description: "Block Firefox",
+        executable: "firefox",
+        windowHandling: 1
+      }
+    ],
+    
+    // Platform Specific
+    originatorVersion: "SEB_Web_3.10.0"
   }
 }
 
-// Convert config to proper SEB format (plist/binary)
-function convertToSEBFormat(config: SEBConfig): Buffer {
-  // SEB v3.10 expects a plist format
-  // This is a simplified conversion - in production you might want to use a proper plist library
-  
+// Convert config object to Apple plist XML format
+function convertToPlistXML(config: SEBConfig): string {
   const plistHeader = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-`;
+`
 
   const plistFooter = `</dict>
-</plist>`;
+</plist>`
 
-  let plistContent = '';
-
-  // Convert each config property to plist format
-  for (const [key, value] of Object.entries(config)) {
-    plistContent += `\t<key>${key}</key>\n`;
-    
+  function convertValue(value: any): string {
     if (typeof value === 'boolean') {
-      plistContent += `\t<${value ? 'true' : 'false'}/>\n`;
+      return value ? '<true/>' : '<false/>'
     } else if (typeof value === 'number') {
-      plistContent += `\t<integer>${value}</integer>\n`;
+      if (Number.isInteger(value)) {
+        return `<integer>${value}</integer>`
+      } else {
+        return `<real>${value}</real>`
+      }
     } else if (typeof value === 'string') {
-      plistContent += `\t<string>${value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</string>\n`;
+      return `<string>${escapeXml(value)}</string>`
     } else if (Array.isArray(value)) {
-      plistContent += `\t<array>\n`;
-      value.forEach(item => {
-        if (typeof item === 'object') {
-          plistContent += `\t\t<dict>\n`;
-          for (const [itemKey, itemValue] of Object.entries(item)) {
-            plistContent += `\t\t\t<key>${itemKey}</key>\n`;
-            if (typeof itemValue === 'boolean') {
-              plistContent += `\t\t\t<${itemValue ? 'true' : 'false'}/>\n`;
-            } else if (typeof itemValue === 'number') {
-              plistContent += `\t\t\t<integer>${itemValue}</integer>\n`;
-            } else {
-              plistContent += `\t\t\t<string>${String(itemValue).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</string>\n`;
-            }
+      let arrayContent = '<array>\n'
+      for (const item of value) {
+        if (typeof item === 'object' && item !== null) {
+          arrayContent += '<dict>\n'
+          for (const [key, val] of Object.entries(item)) {
+            arrayContent += `<key>${escapeXml(key)}</key>\n`
+            arrayContent += convertValue(val) + '\n'
           }
-          plistContent += `\t\t</dict>\n`;
+          arrayContent += '</dict>\n'
         } else {
-          plistContent += `\t\t<string>${String(item)}</string>\n`;
+          arrayContent += convertValue(item) + '\n'
         }
-      });
-      plistContent += `\t</array>\n`;
+      }
+      arrayContent += '</array>'
+      return arrayContent
+    } else if (typeof value === 'object' && value !== null) {
+      let dictContent = '<dict>\n'
+      for (const [key, val] of Object.entries(value)) {
+        dictContent += `<key>${escapeXml(key)}</key>\n`
+        dictContent += convertValue(val) + '\n'
+      }
+      dictContent += '</dict>'
+      return dictContent
     }
+    return '<string></string>'
   }
 
-  const fullPlist = plistHeader + plistContent + plistFooter;
-  return Buffer.from(fullPlist, 'utf8');
+  function escapeXml(str: string): string {
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;')
+  }
+
+  let plistContent = ''
+  for (const [key, value] of Object.entries(config)) {
+    plistContent += `<key>${escapeXml(key)}</key>\n`
+    plistContent += convertValue(value) + '\n'
+  }
+
+  return plistHeader + plistContent + plistFooter
+}
+
+// Create proper SEB binary format with compression and "plnd" prefix
+async function createSEBBinaryFile(config: SEBConfig): Promise<Buffer> {
+  try {
+    // 1. Convert to plist XML
+    const plistXML = convertToPlistXML(config)
+    
+    // 2. Compress with gzip
+    const compressedData = await gzip(Buffer.from(plistXML, 'utf8'))
+    
+    // 3. Add "plnd" prefix for plain data (unencrypted but compressed)
+    const prefix = Buffer.from('plnd', 'ascii')
+    const sebData = Buffer.concat([prefix, compressedData])
+    
+    // 4. Compress the entire file again (as per SEB format specification)
+    const finalCompressed = await gzip(sebData)
+    
+    return finalCompressed
+  } catch (error) {
+    console.error('Error creating SEB binary file:', error)
+    throw error
+  }
 }
 
 export async function GET(request: NextRequest) {
@@ -286,32 +246,46 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Course ID is required' }, { status: 400 })
     }
 
+    console.log('Generating SEB v3.10 binary config for course:', courseId)
+
     // Generate SEB configuration
     const sebConfig = generateSEBConfig(courseId, sessionId || undefined)
     
-    // Convert to proper SEB format (plist/binary)
-    const sebData = convertToSEBFormat(sebConfig)
+    // Create proper SEB binary format
+    const sebBinaryData = await createSEBBinaryFile(sebConfig)
     
-    // Create filename with timestamp to ensure uniqueness
+    // Create filename with timestamp
     const timestamp = Date.now()
     const filename = `secure_exam_${courseId}_${timestamp}.seb`
     
-    // Return as proper .seb file
-    return new Response(new Uint8Array(sebData), {
+    console.log('SEB config generated:', {
+      filename,
+      size: sebBinaryData.length,
+      format: 'binary_compressed',
+      prefix: 'plnd'
+    })
+    
+    // Return as proper .seb binary file
+    return new Response(new Uint8Array(sebBinaryData), {
       headers: {
         'Content-Type': 'application/seb',
         'Content-Disposition': `attachment; filename="${filename}"`,
         'Cache-Control': 'no-store, no-cache, must-revalidate',
         'Pragma': 'no-cache',
         'Expires': '0',
-        'Content-Length': sebData.length.toString()
+        'Content-Length': sebBinaryData.length.toString(),
+        'X-SEB-Version': '3.10.0',
+        'X-SEB-Format': 'binary-compressed'
       }
     })
 
   } catch (error) {
     console.error('Error generating SEB config:', error)
     return NextResponse.json(
-      { error: 'Failed to generate SEB configuration' },
+      { 
+        error: 'Failed to generate SEB configuration',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      },
       { status: 500 }
     )
   }
@@ -339,23 +313,27 @@ export async function POST(request: NextRequest) {
       sebConfig = { ...sebConfig, ...customConfig }
     }
     
-    // Return configuration as JSON (for programmatic access)
+    // Return configuration info (for testing/debugging)
     return NextResponse.json({
-      config: sebConfig,
+      message: 'SEB configuration ready',
       downloadUrl: `/api/exam/seb-config?courseId=${courseId}${sessionId ? `&sessionId=${sessionId}` : ''}`,
+      format: 'SEB v3.10 binary format (compressed with gzip, plnd prefix)',
       instructions: [
-        '1. Download and install Safe Exam Browser from https://safeexambrowser.org',
-        '2. Close ALL applications and browser windows',
+        '1. Download and install Safe Exam Browser v3.6+ from https://safeexambrowser.org',
+        '2. Close ALL applications and browser windows completely',
         '3. Download the exam configuration file (.seb)',
         '4. Double-click the .seb file to start your secure exam',
-        '5. Your exam will load automatically in the secure environment'
+        '5. Your exam will load automatically in the secure environment',
+        '6. Emergency password: admin123 (only for technical issues)'
       ],
-      troubleshooting: [
-        'If the .seb file doesn\'t open, try right-clicking and selecting "Open with Safe Exam Browser"',
-        'Make sure you have SEB version 3.6 or higher installed',
-        'Check that no other browsers or restricted applications are running',
-        'Contact support if you continue to have issues'
-      ]
+      configDetails: {
+        startURL: sebConfig.startURL,
+        quitURL: sebConfig.quitURL,
+        securityLevel: 'Maximum',
+        urlFiltering: 'Enabled',
+        processBlocking: 'Enabled',
+        keyboardBlocking: 'Enabled'
+      }
     })
 
   } catch (error) {
