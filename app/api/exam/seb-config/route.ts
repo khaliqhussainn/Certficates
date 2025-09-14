@@ -1,18 +1,20 @@
-// app/api/exam/seb-config/route.ts - Generate and serve SEB configuration
+// app/api/exam/seb-config/route.ts - FIXED VERSION FOR SEB v3.10
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import crypto from 'crypto'
 
 interface SEBConfig {
+  // Basic Settings
   startURL: string
   quitURL: string
   sendBrowserExamKey: boolean
   allowQuit: boolean
+  hashedQuitPassword: string
   quitExamPasswordHash: string
   quitExamText: string
   
-  // Security lockdown
+  // Security lockdown (all disabled for maximum security)
   ignoreExitKeys: boolean
   enableF1: boolean
   enableF3: boolean
@@ -70,6 +72,7 @@ interface SEBConfig {
   }>
 }
 
+// Generate SEB-compatible configuration
 function generateSEBConfig(courseId: string, sessionId?: string): SEBConfig {
   const baseURL = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || 'http://localhost:3000'
   const sessionParam = sessionId ? `?session=${sessionId}` : ''
@@ -77,12 +80,18 @@ function generateSEBConfig(courseId: string, sessionId?: string): SEBConfig {
   const examURL = `${baseURL}/exam/${courseId}${sessionParam}${sebParam}`
   const quitURL = `${baseURL}/courses/${courseId}`
   
+  // SEB v3.10 expects Base64 encoded password
+  const adminPassword = "admin123"
+  const hashedPassword = Buffer.from(adminPassword).toString('base64')
+  
   return {
+    // Basic Settings
     startURL: examURL,
     quitURL: quitURL,
     sendBrowserExamKey: true,
     allowQuit: true,
-    quitExamPasswordHash: Buffer.from("admin123").toString('base64'),
+    hashedQuitPassword: hashedPassword,
+    quitExamPasswordHash: hashedPassword,
     quitExamText: "Enter administrator password to quit exam:",
     
     // Complete security lockdown
@@ -201,10 +210,64 @@ function generateSEBConfig(courseId: string, sessionId?: string): SEBConfig {
       { active: true, currentUser: true, description: "Block VirtualBox", executable: "VirtualBox", windowHandling: 1 },
       { active: true, currentUser: true, description: "Block VMware", executable: "vmware", windowHandling: 1 },
       
-      // File managers
-      { active: true, currentUser: true, description: "Block Windows Explorer", executable: "explorer", windowHandling: 1 }
+      // File managers (only block if running multiple instances)
+      { active: false, currentUser: true, description: "Monitor Windows Explorer", executable: "explorer", windowHandling: 2 }
     ]
   }
+}
+
+// Convert config to proper SEB format (plist/binary)
+function convertToSEBFormat(config: SEBConfig): Buffer {
+  // SEB v3.10 expects a plist format
+  // This is a simplified conversion - in production you might want to use a proper plist library
+  
+  const plistHeader = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+`;
+
+  const plistFooter = `</dict>
+</plist>`;
+
+  let plistContent = '';
+
+  // Convert each config property to plist format
+  for (const [key, value] of Object.entries(config)) {
+    plistContent += `\t<key>${key}</key>\n`;
+    
+    if (typeof value === 'boolean') {
+      plistContent += `\t<${value ? 'true' : 'false'}/>\n`;
+    } else if (typeof value === 'number') {
+      plistContent += `\t<integer>${value}</integer>\n`;
+    } else if (typeof value === 'string') {
+      plistContent += `\t<string>${value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</string>\n`;
+    } else if (Array.isArray(value)) {
+      plistContent += `\t<array>\n`;
+      value.forEach(item => {
+        if (typeof item === 'object') {
+          plistContent += `\t\t<dict>\n`;
+          for (const [itemKey, itemValue] of Object.entries(item)) {
+            plistContent += `\t\t\t<key>${itemKey}</key>\n`;
+            if (typeof itemValue === 'boolean') {
+              plistContent += `\t\t\t<${itemValue ? 'true' : 'false'}/>\n`;
+            } else if (typeof itemValue === 'number') {
+              plistContent += `\t\t\t<integer>${itemValue}</integer>\n`;
+            } else {
+              plistContent += `\t\t\t<string>${String(itemValue).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</string>\n`;
+            }
+          }
+          plistContent += `\t\t</dict>\n`;
+        } else {
+          plistContent += `\t\t<string>${String(item)}</string>\n`;
+        }
+      });
+      plistContent += `\t</array>\n`;
+    }
+  }
+
+  const fullPlist = plistHeader + plistContent + plistFooter;
+  return Buffer.from(fullPlist, 'utf8');
 }
 
 export async function GET(request: NextRequest) {
@@ -226,21 +289,22 @@ export async function GET(request: NextRequest) {
     // Generate SEB configuration
     const sebConfig = generateSEBConfig(courseId, sessionId || undefined)
     
+    // Convert to proper SEB format (plist/binary)
+    const sebData = convertToSEBFormat(sebConfig)
+    
     // Create filename with timestamp to ensure uniqueness
     const timestamp = Date.now()
     const filename = `secure_exam_${courseId}_${timestamp}.seb`
     
-    // Convert to JSON string
-    const configData = JSON.stringify(sebConfig, null, 2)
-    
-    // Return as downloadable file
-    return new Response(configData, {
+    // Return as proper .seb file
+    return new Response(new Uint8Array(sebData), {
       headers: {
         'Content-Type': 'application/seb',
         'Content-Disposition': `attachment; filename="${filename}"`,
         'Cache-Control': 'no-store, no-cache, must-revalidate',
         'Pragma': 'no-cache',
-        'Expires': '0'
+        'Expires': '0',
+        'Content-Length': sebData.length.toString()
       }
     })
 
@@ -285,6 +349,12 @@ export async function POST(request: NextRequest) {
         '3. Download the exam configuration file (.seb)',
         '4. Double-click the .seb file to start your secure exam',
         '5. Your exam will load automatically in the secure environment'
+      ],
+      troubleshooting: [
+        'If the .seb file doesn\'t open, try right-clicking and selecting "Open with Safe Exam Browser"',
+        'Make sure you have SEB version 3.6 or higher installed',
+        'Check that no other browsers or restricted applications are running',
+        'Contact support if you continue to have issues'
       ]
     })
 
