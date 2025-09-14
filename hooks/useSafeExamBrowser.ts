@@ -1,4 +1,4 @@
-// hooks/useSafeExamBrowser.ts - Enhanced SEB Detection
+// Create hooks/useSafeExamBrowser.ts
 import { useState, useEffect, useCallback } from 'react'
 
 interface SEBInfo {

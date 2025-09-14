@@ -1,9 +1,12 @@
-// Certificate Platform: app/api/user/enrollments/route.ts
+// 2. Fix app/api/user/enrollments/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { courseIntegration } from '@/lib/courseIntegration'
+
+// Add this directive to make it dynamic
+export const dynamic = 'force-dynamic'
 
 // GET /api/user/enrollments - Get user's course completions and certificates
 export async function GET(request: NextRequest) {
