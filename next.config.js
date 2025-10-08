@@ -1,9 +1,35 @@
-// next.config.js - Updated Configuration
+// next.config.js - Fixed Configuration
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   experimental: {
-    serverComponentsExternalPackages: ["@prisma/client", "bcryptjs"],
+    serverComponentsExternalPackages: [
+      "@prisma/client", 
+      "bcryptjs",
+      "nodemailer"  // Add nodemailer here
+    ],
     esmExternals: "loose",
+  },
+  webpack: (config, { isServer }) => {
+    // Fixes for nodemailer and other Node.js modules
+    if (isServer) {
+      config.externals.push({
+        nodemailer: 'commonjs nodemailer',
+      })
+    } else {
+      // Don't resolve nodemailer on client side
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        fs: false,
+        net: false,
+        tls: false,
+        crypto: false,
+        stream: false,
+        util: false,
+        buffer: false,
+        'node:buffer': false,
+      }
+    }
+    return config
   },
   async headers() {
     return [

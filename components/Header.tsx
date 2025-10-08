@@ -1,5 +1,5 @@
-// components/Header.tsx
 'use client'
+// components/Header.tsx
 import { useState } from 'react'
 import { useSession, signOut } from 'next-auth/react'
 import Link from 'next/link'
@@ -10,6 +10,11 @@ export default function Header() {
   const pathname = usePathname()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
+    // Hide header on auth pages
+  if (pathname?.startsWith('/auth/')) {
+    return null
+  }
+  
   const handleSignOut = () => {
     signOut({ callbackUrl: '/' })
   }
@@ -17,9 +22,7 @@ export default function Header() {
   const navigation = [
     { name: 'Home', href: '/' },
     { name: 'Courses', href: '/courses' },
-    { name: 'Certificates', href: '/certificates' },
-    { name: 'About', href: '/about' },
-    { name: 'Contact', href: '/contact' },
+
   ]
 
   const isActive = (href: string) => pathname === href

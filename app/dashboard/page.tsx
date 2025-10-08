@@ -1,94 +1,100 @@
-// app/dashboard/page.tsx - Professional Dashboard
 'use client'
 import { useState, useEffect } from 'react'
 import { useSession } from 'next-auth/react'
 import Link from 'next/link'
 import Image from 'next/image'
-import { 
-  Home, 
-  BookOpen, 
-  Award, 
-  FileText, 
-  CreditCard, 
-  User, 
-  DollarSign, 
-  Download, 
-  Shield, 
+import {
+  Home,
+  BookOpen,
+  Award,
+  FileText,
+  CreditCard,
+  User,
+  DollarSign,
+  Download,
+  Shield,
   ArrowRight,
   TrendingUp,
   Calendar,
   Eye
 } from 'lucide-react'
 
+interface Course {
+  id: string
+  title: string
+  category: string
+  level: string
+  thumbnail?: string
+  certificatePrice: number
+}
+
+interface Completion {
+  id: string
+  courseId: string
+  completedAt: string
+  progress: number
+  course: Course
+}
+
+interface Certificate {
+  id: string
+  courseId: string
+  certificateNumber: string
+  score: number
+  issuedAt: string
+  pdfPath?: string
+  course: Course
+}
+
+interface ExamAttempt {
+  id: string
+  courseId: string
+  score?: number
+  passed: boolean
+  startedAt: string
+  completedAt?: string
+  course: Course
+}
+
+interface Payment {
+  id: string
+  courseId?: string
+  amount: number
+  status: string
+  createdAt: string
+}
+
 interface DashboardData {
-  completions: {
-    id: string
-    courseId: string
-    completedAt: string
-    progress: number
-    course: {
-      id: string
-      title: string
-      category: string
-      level: string
-      thumbnail?: string
-      certificatePrice: number
-    }
-  }[]
-  certificates: {
-    id: string
-    courseId: string
-    certificateNumber: string
-    score: number
-    issuedAt: string
-    pdfPath?: string
-    course: {
-      title: string
-      category: string
-      level: string
-    }
-  }[]
-  examAttempts: {
-    id: string
-    courseId: string
-    score?: number
-    passed: boolean
-    startedAt: string
-    completedAt?: string
-    course: {
-      title: string
-      certificatePrice: number
-    }
-  }[]
-  payments: {
-    id: string
-    courseId?: string
-    amount: number
-    status: string
-    createdAt: string
-  }[]
+  completions: Completion[]
+  certificates: Certificate[]
+  examAttempts: ExamAttempt[]
+  payments: Payment[]
 }
 
 export default function DashboardPage() {
-  const { data: session } = useSession()
+  const { data: session, status } = useSession()
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState('overview')
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (session?.user?.id) {
+    if (status === 'authenticated' && session?.user?.id) {
       fetchDashboardData()
     }
-  }, [session])
+  }, [session, status])
 
   const fetchDashboardData = async () => {
     try {
       setLoading(true)
       const response = await fetch('/api/user/enrollments')
+      if (!response.ok) {
+        throw new Error('Failed to fetch dashboard data')
+      }
       const data = await response.json()
       setDashboardData(data)
     } catch (error) {
       console.error('Error fetching dashboard data:', error)
+      setError('Failed to load dashboard data. Please try again later.')
     } finally {
       setLoading(false)
     }
@@ -102,12 +108,41 @@ export default function DashboardPage() {
     })
   }
 
-  if (loading) {
+  if (status === 'loading' || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-white">
         <div className="text-center">
           <div className="animate-spin rounded-full h-8 w-8 border-2 border-[#001e62] border-t-transparent mx-auto"></div>
           <p className="mt-3 text-sm text-gray-600">Loading dashboard...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (status === 'unauthenticated') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white">
+        <div className="text-center">
+          <p className="text-sm text-gray-600">Please sign in to access your dashboard.</p>
+          <Link href="/auth/signin" className="mt-2 inline-block text-[#001e62] hover:underline">
+            Sign In
+          </Link>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white">
+        <div className="text-center">
+          <p className="text-sm text-red-600">{error}</p>
+          <button
+            onClick={fetchDashboardData}
+            className="mt-2 inline-block text-[#001e62] hover:underline"
+          >
+            Retry
+          </button>
         </div>
       </div>
     )
@@ -124,7 +159,6 @@ export default function DashboardPage() {
 
   const navigation = [
     { id: 'overview', name: 'Overview', icon: Home, href: '/dashboard' },
- 
   ]
 
   return (
@@ -178,7 +212,6 @@ export default function DashboardPage() {
               </div>
             </div>
           </div>
-
           <div className="bg-white rounded-lg border border-gray-200 p-4 hover:shadow-sm transition-shadow">
             <div className="flex items-center justify-between">
               <div>
@@ -190,7 +223,6 @@ export default function DashboardPage() {
               </div>
             </div>
           </div>
-
           <div className="bg-white rounded-lg border border-gray-200 p-4 hover:shadow-sm transition-shadow">
             <div className="flex items-center justify-between">
               <div>
@@ -202,11 +234,10 @@ export default function DashboardPage() {
               </div>
             </div>
           </div>
-
           <div className="bg-white rounded-lg border border-gray-200 p-4 hover:shadow-sm transition-shadow">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-gray-600 uppercase tracking-wide">Total Invested</p>
+                <p className="text-xs font-medium text-gray-600 uppercase tracking-wide">Payment</p>
                 <p className="text-2xl font-semibold text-[#001e62] mt-1">${stats.totalSpent}</p>
               </div>
               <div className="p-2 bg-[#001e62]/10 rounded-lg">
@@ -216,6 +247,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        {/* Main Content Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Recent Certificates */}
           <div className="bg-white rounded-lg border border-gray-200 p-5">
@@ -224,15 +256,14 @@ export default function DashboardPage() {
                 <Award className="w-5 h-5 mr-2" />
                 Recent Certificates
               </h2>
-              <Link 
-                href="/dashboard/certificates" 
+              <Link
+                href="/certificates"
                 className="text-[#001e62] hover:text-[#001e62]/80 text-sm font-medium flex items-center transition-colors"
               >
                 View All
                 <ArrowRight className="w-4 h-4 ml-1" />
               </Link>
             </div>
-
             {dashboardData?.certificates.length === 0 ? (
               <div className="text-center py-8">
                 <div className="p-3 bg-gray-100 rounded-full w-fit mx-auto mb-3">
@@ -291,15 +322,14 @@ export default function DashboardPage() {
                 <BookOpen className="w-5 h-5 mr-2" />
                 Completed Courses
               </h2>
-              <Link 
-                href="/dashboard/courses" 
+              <Link
+                href="/courses"
                 className="text-[#001e62] hover:text-[#001e62]/80 text-sm font-medium flex items-center transition-colors"
               >
                 View All
                 <ArrowRight className="w-4 h-4 ml-1" />
               </Link>
             </div>
-
             {dashboardData?.completions.length === 0 ? (
               <div className="text-center py-8">
                 <div className="p-3 bg-gray-100 rounded-full w-fit mx-auto mb-3">
@@ -308,7 +338,7 @@ export default function DashboardPage() {
                 <p className="text-gray-600 text-sm font-medium">No completed courses yet</p>
                 <p className="text-gray-500 text-xs mt-1">Complete courses on the main website to see them here</p>
                 <Link
-                  href="/dashboard/courses"
+                  href="/courses"
                   className="mt-3 inline-flex items-center bg-[#001e62] text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-[#001e62]/90 transition-colors"
                 >
                   <BookOpen className="w-3 h-3 mr-1" />
@@ -347,7 +377,7 @@ export default function DashboardPage() {
                       </div>
                     </div>
                     <Link
-                      href={`/dashboard/courses/${completion.courseId}`}
+                      href={`/courses/${completion.courseId}`}
                       className="inline-flex items-center bg-[#001e62] text-white px-3 py-1.5 rounded text-xs font-medium hover:bg-[#001e62]/90 transition-colors"
                     >
                       <Award className="w-3 h-3 mr-1" />
@@ -376,7 +406,6 @@ export default function DashboardPage() {
                 <p className="text-xs text-gray-600">Find courses for certification</p>
               </div>
             </Link>
-
             <Link
               href="/dashboard/certificates"
               className="flex items-center p-3 border border-gray-200 rounded-lg hover:border-[#001e62]/30 hover:bg-gray-50 transition-all group"
@@ -389,9 +418,8 @@ export default function DashboardPage() {
                 <p className="text-xs text-gray-600">View and download certificates</p>
               </div>
             </Link>
-
             <Link
-              href="/dashboard/profile"
+              href="/settings"
               className="flex items-center p-3 border border-gray-200 rounded-lg hover:border-[#001e62]/30 hover:bg-gray-50 transition-all group"
             >
               <div className="p-2 bg-[#001e62]/10 rounded-lg text-[#001e62] mr-3 group-hover:bg-[#001e62]/20 transition-colors">

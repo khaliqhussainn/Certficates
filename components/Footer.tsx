@@ -1,9 +1,16 @@
+"use client"
 // components/Footer.tsx
 import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 
 export default function Footer() {
+  const pathname = usePathname()
   const currentYear = new Date().getFullYear()
 
+  // Hide footer on auth pages
+  if (pathname?.startsWith('/auth/')) {
+    return null
+  }
   return (
     <footer className="bg-[#001e62] text-white">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
