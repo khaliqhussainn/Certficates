@@ -129,7 +129,7 @@ export default function CoursesPage() {
   const getActionButton = (course: Course) => {
     if (!session) {
       return {
-        text: 'Get Started',
+        text: 'Get Certified',
         href: '/auth/signin',
         className: 'w-full bg-[#001e62] text-white py-3 px-6 rounded-xl hover:bg-[#001e62]/90 transition-all hover:scale-[1.02] text-center block font-semibold shadow-lg shadow-[#001e62]/20',
         icon: <GraduationCap className="w-5 h-5" />
