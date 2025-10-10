@@ -86,7 +86,7 @@ export default function Header() {
                         Dashboard
                       </Link>
                       <Link
-                        href="/dashboard/certificates"
+                        href="/dashboard"
                         className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
                       >
                         My Certificates
