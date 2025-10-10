@@ -57,7 +57,7 @@ export async function GET(
     const shuffledQuestions = questions.sort(() => Math.random() - 0.5)
 
     // Map to frontend format
-    const formattedQuestions = shuffledQuestions.map((question, index) => ({
+    const formattedQuestions = shuffledQuestions.map((question: { id: any; question: any; options: any; difficulty: any }, index: number) => ({
       id: question.id,
       question: question.question,
       options: question.options,
