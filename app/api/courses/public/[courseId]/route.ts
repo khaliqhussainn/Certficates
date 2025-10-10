@@ -3,10 +3,11 @@ import { NextRequest, NextResponse } from 'next/server'
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { courseId: string } }
+  { params }: { params: Promise<{ courseId: string }> }
 ) {
   try {
-    const courseId = params.courseId
+    // Await params in Next.js 15
+    const { courseId } = await params
     
     // Try to fetch from course website first
     const courseWebsiteUrl = process.env.COURSE_WEBSITE_URL

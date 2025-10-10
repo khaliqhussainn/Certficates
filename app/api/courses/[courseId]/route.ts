@@ -7,7 +7,7 @@ import { NextRequest, NextResponse } from "next/server"
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { courseId: string } }
+  { params }: { params: Promise<{ courseId: string }> }
 ) {
   try {
     const session = await getServerSession(authOptions)
@@ -16,7 +16,8 @@ export async function GET(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const courseId = params.courseId
+    // Await params in Next.js 15
+    const { courseId } = await params
 
     // First try to get from course website
     const courseWebsiteUrl = process.env.COURSE_WEBSITE_URL
